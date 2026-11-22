@@ -78,10 +78,10 @@
   function slotFor(a, list) {
     const same = list.filter((x) => x.room === a.room);
     const k = same.findIndex((x) => x.id === a.id);
-    const SLOTS = [[2.1, 2.3], [2.9, 1.6], [1.0, 2.6], [2.8, 2.9], [0.8, 1.5], [1.7, 3.1]];
+    const SLOTS = [[2.1, 2.3], [3.0, 1.0], [0.9, 2.9], [3.1, 2.8], [1.0, 1.4], [2.0, 3.2]];
     const s = SLOTS[k % SLOTS.length];
     const o = roomOrigin(roomIdx(a.room));
-    return { x: o.gx + s[0], y: o.gy + s[1] };
+    return { x: o.gx + s[0], y: o.gy + s[1], k };
   }
 
   function setAgents(list) {
@@ -97,15 +97,15 @@
         sprites.set(a.id, s);
       }
       Object.assign(s, { data: a, leaving: false });
-      const tgt = slotFor(a, list); s.tx = tgt.x; s.ty = tgt.y;
+      const tgt = slotFor(a, list); s.tx = tgt.x; s.ty = tgt.y; s.k = tgt.k;
     }
     for (const [id, s] of sprites) if (!ids.has(id)) s.leaving = true;
     renderAgents();
   }
 
   function shortName(a) {
-    if (a.kind === 'main') return a.name.replace('Claude ', '');
-    return (a.name.split(': ')[1] || 'sub').slice(0, 14);
+    const r = a.role || a.name || 'Agente';
+    return r.length > 18 ? r.slice(0, 17) + '…' : r;
   }
 
   function drawAgent(s, t) {
@@ -141,7 +141,8 @@
     }
     const label = shortName(a);
     ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff';
-    ctx.strokeText(label, sx, sy + 15); ctx.fillText(label, sx, sy + 15);
+    const ly = sy + 15 + ((s.k || 0) % 2) * 12;
+    ctx.strokeText(label, sx, ly); ctx.fillText(label, sx, ly);
     ctx.globalAlpha = 1;
   }
 
@@ -186,7 +187,8 @@
       const [c, label] = STAT[a.status] || STAT.ocioso;
       const row = el('div', 'ag' + (a.status === 'aguardando' ? ' wait' : ''));
       const dot = el('div', 'dot'); dot.style.background = (sprites.get(a.id) || {}).color || c;
-      const nm = el('div', 'nm'); nm.append(el('div', null, a.name), el('div', 'room', a.room + (a.tool ? ' · ' + a.tool : '')));
+      const title = el('div'); title.append(el('b', null, a.role || a.name), el('span', 'room', ' ' + (a.tag || '')));
+      const nm = el('div', 'nm'); nm.append(title, el('div', 'act', a.action || ''), el('div', 'room', a.room + (a.kind === 'sub' ? ' · subagente' : '')));
       const chip = el('div', 'chip', label); chip.style.background = c + '22'; chip.style.color = c;
       row.append(dot, nm, chip); elAgents.append(row);
     }

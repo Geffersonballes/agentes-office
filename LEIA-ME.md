@@ -19,6 +19,10 @@ Node.js puro, **sem dependências**. Funciona de dois jeitos:
 | `rooms.example.json` | Exemplo para personalizar as palavras de cada sala (copie para `rooms.json`) |
 | `test/test.js` | Testes automáticos (`npm test`) |
 
+## Nomes dos agentes
+
+Cada agente aparece com a **função** da sala onde está trabalhando (Desenvolvedor, Copywriter, Gestor de Tráfego, Vendedor…) e uma frase do que está fazendo (editando arquivo, rodando comando, pesquisando na web, usando canva…). Subagentes usam o tipo informado pelo Claude Code (Explorador, Planejador, Assistente geral). O código curto (`#6abf`) diferencia sessões. As funções ficam nos mapas `ROLE` e `SUBROLE` do `server.js`.
+
 ## Segurança
 
 - **Senha do painel** (`PANEL_PASSWORD`): sem ela não se vê nada (`/`, `/events`, `/state`, `/demo`). Login com cookie assinado `HttpOnly`, `Secure` (em HTTPS) e `SameSite=Strict`, válido por 30 dias. Trocar a senha derruba todas as sessões.

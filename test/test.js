@@ -136,6 +136,24 @@ test('fluxo de status: delegando, aguardando, concluído', async () => {
   assert.strictEqual(a.find((x) => x.id === 'flow').status, 'concluido');
 });
 
+test('agentes ganham nome pela função e frase do que estão fazendo', async () => {
+  const send = (o) => req('POST', '/event', { headers: auth, body: ev(Object.assign({ session_id: 'role-abcd' }, o)) });
+  const cookie = await login();
+  const st = async () => JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body).agents;
+  await send({ event: 'PreToolUse', tool_name: 'Edit' });
+  let a = (await st()).find((x) => x.id === 'role-abcd');
+  assert.strictEqual(a.role, 'Desenvolvedor'); assert.strictEqual(a.action, 'editando arquivo'); assert.strictEqual(a.tag, '#role');
+  await send({ event: 'PreToolUse', tool_name: 'mcp__canva__generate-design' });
+  a = (await st()).find((x) => x.id === 'role-abcd');
+  assert.strictEqual(a.role, 'Copywriter'); assert.strictEqual(a.action, 'usando canva');
+  await send({ event: 'SubagentStart', agent_id: 'zz9', agent_type: 'Explore' });
+  const sub = (await st()).find((x) => x.id === 'role-abcd:zz9');
+  assert.strictEqual(sub.role, 'Explorador');
+  await send({ event: 'Notification', notification_type: 'permission_prompt' });
+  a = (await st()).find((x) => x.id === 'role-abcd');
+  assert.strictEqual(a.role, 'Aguardando você'); assert.strictEqual(a.action, 'esperando sua aprovação');
+});
+
 test('/demo exige cabeçalho anti-CSRF', async () => {
   const cookie = await login();
   assert.strictEqual((await req('POST', '/demo', { headers: { Cookie: cookie } })).status, 403);

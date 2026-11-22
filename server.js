@@ -218,9 +218,52 @@ const STATUS = ['trabalhando', 'ocioso', 'delegando', 'aguardando', 'concluido']
 const EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'SubagentStart', 'SubagentStop', 'Notification', 'Stop', 'PreCompact'];
 
+// Função de cada agente conforme a sala onde está trabalhando.
+const ROLE = {
+  'CEO IA': 'CEO / Estrategista', 'Operações': 'Gerente de Operações', 'Tecnologia': 'Desenvolvedor',
+  'Produto': 'Pesquisador de Produto', 'Aquisição': 'Captador de Leads', 'Vendas': 'Vendedor',
+  'Follow-up / CRM': 'Atendente de CRM', 'Copy': 'Copywriter', 'Landing Pages': 'Designer de Páginas',
+  'Tráfego': 'Gestor de Tráfego', 'Pós-venda': 'Suporte ao Cliente', 'Curso IA Professores': 'Professor de IA',
+  'Sala de Jogos': 'Testador', 'Sua mesa / Aprovações': 'Aguardando você', 'Entrada': 'Recepção',
+};
+// Função dos subagentes conforme o tipo que o Claude Code informa.
+const SUBROLE = {
+  'explore': 'Explorador', 'plan': 'Planejador', 'general-purpose': 'Assistente geral',
+  'statusline-setup': 'Configurador', 'claude-code-guide': 'Consultor do Claude Code', 'web-fetch': 'Leitor de sites',
+};
+function toolAction(tool) {
+  if (!tool) return null;
+  const t = tool.toLowerCase();
+  if (t.startsWith('mcp__')) {
+    const server = t.split('__')[1] || '';
+    return 'usando ' + server.replace(/^plugin_/, '').split('_')[0].replace(/-/g, ' ');
+  }
+  const map = { read: 'lendo arquivo', edit: 'editando arquivo', multiedit: 'editando arquivo', write: 'escrevendo arquivo',
+    notebookedit: 'editando notebook', bash: 'rodando comando', powershell: 'rodando comando', grep: 'procurando no código',
+    glob: 'procurando arquivos', websearch: 'pesquisando na web', webfetch: 'lendo site', task: 'delegando tarefa',
+    agent: 'delegando tarefa', todowrite: 'organizando tarefas', skill: 'usando habilidade' };
+  return map[t] || 'usando ' + tool;
+}
+function roleOf(a) {
+  if (a.kind === 'sub') {
+    const t = String(a.agentType || '').toLowerCase();
+    return SUBROLE[t] || (a.agentType ? a.agentType : 'Assistente') ;
+  }
+  return ROLE[a.room] || 'Agente';
+}
+function actionOf(a) {
+  switch (a.status) {
+    case 'aguardando': return 'esperando sua aprovação';
+    case 'concluido': return 'tarefa concluída';
+    case 'ocioso': return 'livre, esperando tarefa';
+    case 'delegando': return 'coordenando subagentes';
+    default: return toolAction(a.tool) || 'pensando';
+  }
+}
+const labelOf = (a) => roleOf(a) + ' ' + a.tag;
 function publicAgent(a) {
-  return { id: a.id, name: a.name, kind: a.kind, parent: a.parent || null, status: a.status, room: a.room,
-    tool: a.tool || null, since: a.since, updated: a.updated };
+  return { id: a.id, name: labelOf(a), role: roleOf(a), tag: a.tag, action: actionOf(a), kind: a.kind,
+    parent: a.parent || null, status: a.status, room: a.room, tool: a.tool || null, since: a.since, updated: a.updated };
 }
 function snapshot() {
   return { rooms: ROOMS, detail: PANEL_DETAIL, agents: [...agents.values()].map(publicAgent), log: log.slice(-60) };
@@ -230,7 +273,7 @@ function ensureMain(sid) {
   let a = agents.get(sid);
   if (!a) {
     const n = [...agents.values()].filter((x) => x.kind === 'main').length + 1;
-    a = { id: sid, name: 'Claude #' + sid.replace(/[^A-Za-z0-9]/g, '').slice(0, 4), kind: 'main', status: 'ocioso',
+    a = { id: sid, tag: '#' + sid.replace(/[^A-Za-z0-9]/g, '').slice(0, 4), kind: 'main', status: 'ocioso',
       room: 'Entrada', since: Date.now(), updated: Date.now(), ts: 0, subs: new Set(), n };
     agents.set(sid, a);
   }
@@ -298,7 +341,7 @@ function applyEvent(ev) {
       if (!subId) break;
       let s = agents.get(subId);
       if (!s) {
-        s = { id: subId, name: 'Subagente' + (ev.agent_type ? ': ' + ev.agent_type : ''), kind: 'sub', parent: sid,
+        s = { id: subId, tag: '#' + ev.agent_id.replace(/[^A-Za-z0-9]/g, '').slice(0, 4), agentType: ev.agent_type || '', kind: 'sub', parent: sid,
           status: 'trabalhando', room: 'Entrada', since: Date.now(), updated: Date.now(), ts: 0 };
         agents.set(subId, s);
       }
@@ -337,7 +380,7 @@ function applyEvent(ev) {
       break;
   }
 
-  pushLog({ agent: target.name, agentId: target.id, event: ev.event, tool: ev.tool_name || ev.agent_type || null,
+  pushLog({ agent: labelOf(target), agentId: target.id, event: ev.event, tool: ev.tool_name || ev.agent_type || null,
     detail: PANEL_DETAIL === 'normal' ? (ev.detail || null) : null, ok: ev.event !== 'PostToolUseFailure' });
   scheduleAgents();
 }
@@ -394,7 +437,7 @@ function runDemo() {
     [5500, { event: 'PostToolUse', tool_name: 'Edit' }],
     [6500, { event: 'PreToolUse', tool_name: 'Task' }],
     [7000, { event: 'SubagentStart', agent_id: 'a1', agent_type: 'Explore' }],
-    [8000, { event: 'SubagentStart', agent_id: 'a2', agent_type: 'copy landing' }],
+    [8000, { event: 'SubagentStart', agent_id: 'a2', agent_type: 'general-purpose' }],
     [9500, { event: 'PreToolUse', tool_name: 'WebSearch', agent_id: 'a1' }],
     [11000, { event: 'Notification', notification_type: 'permission_prompt' }],
     [15000, { event: 'PostToolUse', tool_name: 'Bash' }],
