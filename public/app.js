@@ -114,7 +114,7 @@
   }
 
   // ================================================================ céu, chão e corredores
-  const TZ = 'America/Sao_Paulo';
+  const TZ = 'Etc/GMT+4';   // UTC-4 fixo (no Intl o sinal é invertido)
   function brasilia() {
     if (QS.has('hora')) { const h = Math.min(23.99, Math.max(0, Number(QS.get('hora')) || 0)); return { h, txt: String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.round((h % 1) * 60)).padStart(2, '0') + ' (prévia)' }; }
     try {
@@ -391,7 +391,7 @@
     { p: [0.38, 0.7], pose: 'phone', dir: 1 }, { p: [0.38, 1.3], pose: 'magazine', dir: 1 }, { p: [0.38, 1.9], pose: 'phone', dir: 1 },
     { p: [0.38, 2.5], pose: 'magazine', dir: 1 }, { p: [0.38, 3.1], pose: 'phone', dir: 1 },
   ];
-  // Pré-visualização opcional pela URL: ?pausa=10 (segundos até ir para a Sala de Jogos) e ?hora=23 (hora de Brasília)
+  // Pré-visualização opcional pela URL: ?pausa=10 (segundos até ir para a Sala de Jogos) e ?hora=23 (hora local, UTC-4)
   const QS = new URLSearchParams(location.search);
   const IDLE_TO_GAMES_MS = QS.has('pausa') ? Math.max(1, Number(QS.get('pausa')) || 180) * 1000 : 3 * 60e3;
   // Ociosos ficam na Sala de Espera. Depois de um tempo, eles se revezam: metade vai para a Sala de Jogos
@@ -778,11 +778,11 @@
     drawLinks(t);
     [...sprites.values()].sort((a, b) => a.x + a.y - (b.x + b.y)).forEach((s) => drawAgent(s, t));
     drawParticles(dt);
-    // relógio de Brasília (fixo na tela)
+    // relógio local UTC-4 (fixo na tela)
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const dpr = window.devicePixelRatio || 1;
     ctx.font = `600 ${12 * dpr}px system-ui`; ctx.textAlign = 'left';
-    const txt = `${sk.txt} · ${sk.label} em Brasília`;
+    const txt = `${sk.txt} · ${sk.label} (UTC-4)`;
     const w = ctx.measureText(txt).width + 16 * dpr;
     ctx.fillStyle = 'rgba(13,17,23,.75)'; roundRect(10 * dpr, 10 * dpr, w, 22 * dpr, 11 * dpr); ctx.fill();
     ctx.fillStyle = '#c9d1d9'; ctx.fillText(txt, 18 * dpr, 25 * dpr);
