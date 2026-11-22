@@ -6,5 +6,7 @@ node install.js --url=https://agentes.ballestech.com.br --detalhe=minimo
 echo.
 node install.js --testar
 echo.
+node install.js --diagnostico
+echo.
 echo Pronto. Feche e abra de novo o Claude Code.
 pause

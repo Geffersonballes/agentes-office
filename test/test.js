@@ -190,7 +190,7 @@ test('hook: servidor fora do ar não atrasa nem quebra (sai rápido, código 0, 
   const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'x' });
   const r = runHook(input, { AGENTES_OFFICE_CONFIG: cfg });
   assert.strictEqual(r.status, 0); assert.strictEqual(r.out, '');
-  assert.ok(r.ms < 1000, 'demorou ' + r.ms + ' ms');
+  assert.ok(r.ms < 1800, 'demorou ' + r.ms + ' ms'); // trava de 1,5 s
   const lixo = runHook('isto não é json', { AGENTES_OFFICE_CONFIG: cfg });
   assert.strictEqual(lixo.status, 0); assert.strictEqual(lixo.out, '');
   const vazio = runHook('', { AGENTES_OFFICE_CONFIG: path.join(dir, 'nao-existe.json') });

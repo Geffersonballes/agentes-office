@@ -31,7 +31,13 @@ Node.js puro, **sem dependências**. Funciona de dois jeitos:
 
 ## O hook nunca atrapalha o Claude Code
 
-O `hook.js` lê o evento, entrega a um processo em segundo plano e **sai na hora** (código 0, sem imprimir nada). Quem espera a rede (até 4 s) é o processo em segundo plano. Se o servidor estiver fora do ar, o evento simplesmente se perde. Trava de segurança: o hook nunca passa de 1,5 s.
+O `hook.js` envia o evento e espera no máximo ~1,3 s (trava de segurança de 1,5 s). Sempre sai com código 0 e nunca imprime nada. Se o servidor estiver fora do ar, o evento simplesmente se perde.
+
+Opcional no `~/.agentes-office.json`: `"envio": "segundo_plano"` (o envio sai de um processo filho e o hook termina na hora) e `"log": true` (grava em `~/.agentes-office.log` só horário, evento, ferramenta e resultado; nunca conteúdo).
+
+## Não aparece nada no painel?
+
+Dê dois cliques em `diagnostico.bat` (ou `node install.js --diagnostico`). Ele confere a configuração, os hooks no `settings.json`, o `node` no PATH, roda o `hook.js` como o Claude Code roda e mostra a resposta do servidor (200 = ok, 401 = token errado). Lembre de **fechar e abrir de novo o Claude Code** depois de instalar.
 
 ## Colocar online (Render grátis + domínio próprio)
 
