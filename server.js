@@ -170,7 +170,7 @@ const ROOMS = [
 const DEFAULT_RULES = {
   'CEO IA': ['estrategia', 'estratégia', 'planejamento', 'decisao', 'decisão', 'meta', 'okr'],
   'Operações': ['operacao', 'operação', 'processo', 'planilha', 'sheets', 'calendar', 'agenda', 'drive', 'docs'],
-  'Tecnologia': ['bash', 'edit', 'write', 'read', 'grep', 'glob', 'multiedit', 'notebookedit', 'codigo', 'código', 'deploy', 'servidor', 'github', 'git', 'hostinger', 'api', 'bug'],
+  'Tecnologia': ['bash', 'powershell', 'ctx_execute', 'edit', 'write', 'read', 'grep', 'glob', 'multiedit', 'notebookedit', 'codigo', 'código', 'deploy', 'servidor', 'github', 'git', 'hostinger', 'api', 'bug'],
   'Produto': ['produto', 'feature', 'roadmap', 'websearch', 'webfetch', 'pesquisa'],
   'Aquisição': ['aquisicao', 'aquisição', 'lead', 'leads', 'captacao', 'captação', 'funil'],
   'Vendas': ['venda', 'vendas', 'proposta', 'orcamento', 'orçamento', 'checkout', 'stripe', 'shopify'],
