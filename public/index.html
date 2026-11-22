@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Escritório de Agentes</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--line:#2a313c;--text:#e6edf3;--muted:#8b949e;--blue:#4f8cff;--green:#3fb950;--orange:#f0883e;--purple:#a371f7;--gray:#6e7681;--red:#ff7b72}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header h1{font-size:17px;font-weight:700}
+#live{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--muted)}
+#live i{width:9px;height:9px;border-radius:50%;background:var(--gray);display:inline-block}
+#live.on{color:var(--green)}#live.on i{background:var(--green);animation:pulse 1.2s infinite}
+#live.off{color:var(--orange)}#live.off i{background:var(--orange)}
+@keyframes pulse{50%{opacity:.25}}
+.sp{flex:1}
+button,.btn{font:inherit;font-size:13px;font-weight:600;color:var(--text);background:#21262d;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;text-decoration:none}
+button:hover,.btn:hover{border-color:#3d4652}
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;min-width:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+aside{width:340px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+aside h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 14px 6px;font-weight:600}
+#agents{padding:0 10px;max-height:45%;overflow:auto}
+.ag{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;margin-bottom:6px;background:var(--bg);border:1px solid var(--line);font-size:13px}
+.ag .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.ag .nm{flex:1;min-width:0}
+.ag .nm div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ag .room{font-size:11px;color:var(--muted)}
+.chip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap}
+.ag.wait{border-color:var(--orange);box-shadow:0 0 0 2px rgba(240,136,62,.35)}
+.empty{color:var(--muted);font-size:13px;padding:6px 4px 10px}
+#log{flex:1;overflow:auto;padding:0 14px 12px;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:11.5px}
+#log div{padding:3px 0;border-bottom:1px dashed #21262d;word-break:break-word}
+#log .t{color:var(--muted)}
+#log .d{color:var(--muted)}
+footer{font-size:11px;color:var(--muted);padding:6px 16px;border-top:1px solid var(--line);background:var(--panel)}
+@media (max-width:820px){
+  main{flex-direction:column}
+  #stage{flex:none;height:min(56vh,62vw)}
+  header{padding:8px 12px;gap:8px}header h1{font-size:15px}
+  aside{width:auto;border-left:0;border-top:1px solid var(--line);flex:1}
+  #agents{max-height:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Escritório de Agentes</h1>
+  <div id="live"><i></i><span>conectando…</span></div>
+  <div class="sp"></div>
+  <button id="demo" type="button" title="Roda uma simulação de ~25 s">Simular</button>
+  <a class="btn" href="/logout">Sair</a>
+</header>
+<main>
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <aside>
+    <h2>Agentes</h2>
+    <div id="agents"><div class="empty">Nenhum agente ativo.</div></div>
+    <h2>Eventos</h2>
+    <div id="log"></div>
+  </aside>
+</main>
+<footer id="foot">Modo de detalhe: —</footer>
+<script src="/app.js"></script>
+</body>
+</html>

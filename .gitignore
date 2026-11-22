@@ -1,0 +1,15 @@
+# Segredos e configurações locais — nunca versionar
+.env
+.env.*
+*.pem
+*.key
+.agentes-office.json
+*.bak-*
+*.tmp-*
+rooms.json
+
+# Ambiente
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db

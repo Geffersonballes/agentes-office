@@ -1,0 +1,23 @@
+# Blueprint do Render (plano gratuito). Senha e token NÃO ficam aqui:
+# o Render pede os valores na criação (sync: false).
+services:
+  - type: web
+    name: agentes-office
+    runtime: node
+    plan: free
+    region: virginia
+    buildCommand: "echo sem dependencias"
+    startCommand: "node server.js"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: PANEL_DETAIL
+        value: minimo
+      - key: PANEL_PASSWORD
+        sync: false
+      - key: HOOK_TOKEN
+        sync: false

@@ -1,0 +1,15 @@
+{
+  "name": "agentes-office",
+  "version": "2.0.0",
+  "description": "Escritório de Agentes: painel ao vivo dos agentes do Claude Code (com senha e token).",
+  "main": "server.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/test.js",
+    "install-hook": "node install.js",
+    "uninstall-hook": "node install.js --uninstall"
+  }
+}
