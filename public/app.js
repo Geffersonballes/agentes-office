@@ -1,11 +1,12 @@
 'use strict';
 (() => {
-  // ------------------------------------------------------------ desenho
-  const W = 960, H = 560;               // coordenadas lógicas
+  // ================================================================ base do desenho
+  const W = 960, H = 560;                // coordenadas lógicas
   const TW = 44, TH = 22, S = 3.5, OX = 372, OY = 92, WALL = 30;
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
   let scale = 1, offX = 0, offY = 0;
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let ROOMS = ['CEO IA', 'Operações', 'Tecnologia', 'Produto', 'Aquisição', 'Vendas', 'Follow-up / CRM', 'Copy',
     'Landing Pages', 'Tráfego', 'Pós-venda', 'Curso IA Professores', 'Sala de Jogos', 'Sua mesa / Aprovações', 'Entrada'];
@@ -15,11 +16,24 @@
     trabalhando: ['#4f8cff', 'trabalhando'], delegando: ['#a371f7', 'delegando'],
     aguardando: ['#f0883e', 'aguardando aprovação'], concluido: ['#3fb950', 'concluído'], ocioso: ['#6e7681', 'ocioso'],
   };
-  const PALETTE = ['#4f8cff', '#e3b341', '#a371f7', '#3fb950', '#ff7b72', '#39c5cf', '#f778ba', '#d29922'];
+  // Cor da camiseta e acessório de cada função
+  const STYLE = {
+    'Desenvolvedor': ['#4f8cff', 'fone'], 'Copywriter': ['#f778ba', 'caderno'], 'Gestor de Tráfego': ['#3fb950', 'tablet'],
+    'Vendedor': ['#d29922', 'gravata'], 'CEO / Estrategista': ['#8957e5', 'gravata'], 'Gerente de Operações': ['#39c5cf', 'prancheta'],
+    'Pesquisador de Produto': ['#56d364', 'oculos'], 'Captador de Leads': ['#ff7b72', 'tablet'], 'Atendente de CRM': ['#e3b341', 'headset'],
+    'Designer de Páginas': ['#db61a2', 'caderno'], 'Suporte ao Cliente': ['#79c0ff', 'headset'], 'Professor de IA': ['#a371f7', 'oculos'],
+    'Testador': ['#2ea043', 'nenhum'], 'Explorador': ['#56d364', 'oculos'], 'Planejador': ['#a371f7', 'prancheta'],
+    'Assistente geral': ['#e3b341', 'nenhum'],
+  };
+  const SKIN = ['#f1d3b3', '#e0b48f', '#c68c5f', '#a06a42', '#7a4f2e'];
+  const HAIR = ['#2b1d14', '#4a3222', '#1b1b1b', '#8a5a2b', '#d6b370', '#5b2b2b'];
+  const ID_COLORS = ['#4f8cff', '#e3b341', '#a371f7', '#3fb950', '#ff7b72', '#39c5cf', '#f778ba', '#d29922'];
 
   const roomIdx = (name) => { const i = ROOMS.indexOf(name); return i < 0 ? ROOMS.length - 1 : i; };
   const roomOrigin = (i) => ({ gx: (i % 5) * 5, gy: Math.floor(i / 5) * 5 });
   const iso = (x, y, z = 0) => [(x - y) * TW / 2 + OX, (x + y) * TH / 2 + OY - z];
+  const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
+  const lerp = (a, b, k) => a + (b - a) * k;
 
   function resize() {
     const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -36,30 +50,176 @@
   }
   function shade(hex, f) {
     const n = parseInt(hex.slice(1), 16);
-    const c = (v) => Math.min(255, (v * f) | 0);
+    const c = (v) => Math.max(0, Math.min(255, (v * f) | 0));
     return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
   }
-  function box(x, y, w, d, h, col) {
-    const a = iso(x, y, h), b = iso(x + w, y, h), c = iso(x + w, y + d, h), e = iso(x, y + d, h);
-    poly([e, c, iso(x + w, y + d), iso(x, y + d)], shade(col, 0.7));
-    poly([b, c, iso(x + w, y + d), iso(x + w, y)], shade(col, 0.85));
-    poly([a, b, c, e], col);
+  function box(x, y, w, d, h, col, z0 = 0, f = 1) {
+    const a = iso(x, y, z0 + h), b = iso(x + w, y, z0 + h), c = iso(x + w, y + d, z0 + h), e = iso(x, y + d, z0 + h);
+    poly([e, c, iso(x + w, y + d, z0), iso(x, y + d, z0)], shade(col, 0.7 * f));
+    poly([b, c, iso(x + w, y + d, z0), iso(x + w, y, z0)], shade(col, 0.85 * f));
+    poly([a, b, c, e], shade(col, f));
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
+  // painéis nas paredes do fundo: parede "X" (y = gy) e parede "Y" (x = gx)
+  const wallX = (gx, gy, a, b, z1, z2, col) => poly([iso(gx + a, gy, z2), iso(gx + b, gy, z2), iso(gx + b, gy, z1), iso(gx + a, gy, z1)], col);
+  const wallY = (gx, gy, a, b, z1, z2, col) => poly([iso(gx, gy + a, z2), iso(gx, gy + b, z2), iso(gx, gy + b, z1), iso(gx, gy + a, z1)], col);
+  const onWallX = (gx, gy, u, z) => iso(gx + u, gy, z);
 
-  function drawRoom(i, t, hot) {
+  // ================================================================ salas
+  const light = new Array(15).fill(0.78);  // 0.78 = penumbra, 1 = acesa
+
+  function drawRoom(i, t, st) {
     const { gx, gy } = roomOrigin(i);
+    const name = ROOMS[i];
+    const L = light[i];
     const tint = TINT[i % TINT.length];
-    poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy + S), iso(gx, gy + S)], hot ? shade(tint, 1.5 + 0.3 * Math.sin(t * 6)) : tint, '#3a4250');
-    poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy, WALL), iso(gx, gy, WALL)], shade(tint, 1.25));
-    poly([iso(gx, gy), iso(gx, gy + S), iso(gx, gy + S, WALL), iso(gx, gy, WALL)], shade(tint, 1.05));
-    if (i !== ROOMS.length - 1) { box(gx + 1.3, gy + 0.8, 1.1, 0.6, 9, '#8a6d4f'); box(gx + 1.55, gy + 0.85, 0.6, 0.12, 16, '#20262e'); }
-    if (ROOMS[i] === 'Sala de Jogos') box(gx + 0.4, gy + 2.2, 0.9, 0.6, 7, '#2f6f4f');
-    if (ROOMS[i] === 'Sua mesa / Aprovações') box(gx + 2.6, gy + 0.6, 0.45, 0.45, 12, '#c08a3e');
+    const floor = st.hot ? shade(tint, 1.5 + 0.3 * Math.sin(t * 6)) : shade(tint, L);
+    poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy + S), iso(gx, gy + S)], floor, '#3a4250');
+    poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy, WALL), iso(gx, gy, WALL)], shade(tint, 1.25 * L));
+    poly([iso(gx, gy), iso(gx, gy + S), iso(gx, gy + S, WALL), iso(gx, gy, WALL)], shade(tint, 1.05 * L));
+    // luminária no teto (acende)
+    if (L > 0.9) {
+      const c = iso(gx + S / 2, gy + S / 2, 0);
+      const g = ctx.createRadialGradient(c[0], c[1], 2, c[0], c[1], 70);
+      g.addColorStop(0, `rgba(255,236,180,${0.18 * (L - 0.78) / 0.3})`); g.addColorStop(1, 'rgba(255,236,180,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(c[0], c[1], 78, 40, 0, 0, 7); ctx.fill();
+    }
+    themed(i, name, gx, gy, t, st, L);
+    if (name !== 'Entrada') {
+      box(gx + 1.3, gy + 0.8, 1.1, 0.6, 9, '#8a6d4f', 0, L);                 // mesa
+      box(gx + 1.55, gy + 0.85, 0.6, 0.12, 7, '#20262e', 9, L);              // monitor
+      screen(gx + 1.55, gy + 0.97, 0.6, 10, 15, st.lit, t, i);
+      box(gx + 1.62, gy + 1.75, 0.45, 0.4, 5, '#3d444d', 0, L);              // cadeira
+    }
   }
+
+  function screen(x, y, w, z1, z2, lit, t, seed) {
+    poly([iso(x + 0.04, y, z2), iso(x + w - 0.04, y, z2), iso(x + w - 0.04, y, z1), iso(x + 0.04, y, z1)], lit ? '#1f6feb' : '#0b0f14');
+    if (!lit) return;
+    ctx.strokeStyle = 'rgba(190,255,210,.9)'; ctx.lineWidth = 1;
+    for (let k = 0; k < 3; k++) {
+      const len = 0.2 + 0.3 * Math.abs(Math.sin(t * 3 + k * 1.7 + seed));
+      const z = z2 - 1.5 - k * 1.6;
+      const a = iso(x + 0.1, y, z), b = iso(x + 0.1 + len * (w - 0.2), y, z);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+  }
+
+  function themed(i, name, gx, gy, t, st, L) {
+    const f = L;
+    switch (name) {
+      case 'CEO IA': { // quadro de metas
+        wallX(gx, gy, 0.5, 2.3, 12, 26, shade('#d0d7de', f));
+        const bars = [0.4, 0.65, 0.9];
+        bars.forEach((h, k) => {
+          const grow = st.lit && !reduced ? 0.85 + 0.15 * Math.sin(t * 2 + k) : 1;
+          const a = 0.75 + k * 0.5;
+          wallX(gx, gy, a, a + 0.3, 13, 13 + 11 * h * grow, shade(['#f0883e', '#e3b341', '#3fb950'][k], f));
+        });
+        break;
+      }
+      case 'Operações': { // kanban
+        wallX(gx, gy, 0.4, 2.6, 12, 26, shade('#c9d1d9', f));
+        for (let c = 0; c < 3; c++) for (let r = 0; r < 3 - c; r++) {
+          const a = 0.55 + c * 0.7;
+          wallX(gx, gy, a, a + 0.45, 22 - r * 3.4, 24.5 - r * 3.4, shade(['#79c0ff', '#e3b341', '#56d364'][c], f));
+        }
+        break;
+      }
+      case 'Produto': // planta
+        box(gx + 0.3, gy + 2.6, 0.4, 0.4, 5, '#8a5a2b', 0, f);
+        ctx.fillStyle = shade('#2ea043', f); { const p = iso(gx + 0.5, gy + 2.8, 13); ctx.beginPath(); ctx.ellipse(p[0], p[1], 9, 7, 0, 0, 7); ctx.fill(); }
+        break;
+      case 'Aquisição': { // funil na parede
+        const a = iso(gx, gy + 0.8, 26), b = iso(gx, gy + 2.6, 26), c = iso(gx, gy + 1.7, 12);
+        poly([a, b, c], shade('#ff7b72', f));
+        break;
+      }
+      case 'Vendas': { // sino de venda
+        const p = iso(gx + 2.25, gy + 1.05, 12);
+        const wig = st.lit && !reduced ? Math.sin(t * 14) * 0.25 : 0;
+        ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(wig);
+        ctx.fillStyle = shade('#e3b341', f); ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI, 0); ctx.lineTo(6, 1); ctx.lineTo(-6, 1); ctx.fill();
+        ctx.restore();
+        break;
+      }
+      case 'Follow-up / CRM': // calendário
+        wallY(gx, gy, 0.6, 1.8, 13, 25, shade('#f6f8fa', f));
+        wallY(gx, gy, 0.6, 1.8, 22, 25, shade('#ff7b72', f));
+        break;
+      case 'Copy': { // post-its
+        const cols = ['#f9e2af', '#f778ba', '#79c0ff', '#56d364'];
+        for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+          const a = 0.5 + c * 0.6, z = 22 - r * 6;
+          wallY(gx, gy, a, a + 0.42, z - 4.2, z, shade(cols[(r + c) % 4], f));
+        }
+        break;
+      }
+      case 'Landing Pages': // segundo monitor
+        box(gx + 0.45, gy + 0.8, 0.75, 0.6, 9, '#8a6d4f', 0, f);
+        box(gx + 0.5, gy + 0.85, 0.6, 0.12, 7, '#20262e', 9, f);
+        screen(gx + 0.5, gy + 0.97, 0.6, 10, 15, st.lit, t + 1, i + 3);
+        break;
+      case 'Tráfego': { // telão com gráfico subindo
+        wallX(gx, gy, 0.3, 2.9, 11, 28, shade('#0d1117', Math.max(f, 0.8)));
+        ctx.strokeStyle = st.lit ? '#3fb950' : '#2b6a3a'; ctx.lineWidth = 2; ctx.beginPath();
+        const n = 9;
+        for (let k = 0; k <= n; k++) {
+          const u = k / n;
+          const wob = st.lit && !reduced ? Math.sin(t * 3 + k) * 1.2 : 0;
+          const p = onWallX(gx, gy, 0.45 + u * 2.3, 13 + u * 12 + Math.sin(k * 1.9) * 2 + wob);
+          k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]);
+        }
+        ctx.stroke();
+        break;
+      }
+      case 'Pós-venda': { // headset na mesa
+        const p = iso(gx + 2.25, gy + 1.15, 11);
+        ctx.strokeStyle = shade('#c9d1d9', f); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], 4, Math.PI, 0); ctx.stroke();
+        break;
+      }
+      case 'Curso IA Professores': // lousa
+        wallY(gx, gy, 0.4, 3.0, 11, 27, shade('#1f4d3a', Math.max(f, 0.8)));
+        ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          const a = iso(gx, gy + 0.7, 24 - k * 4), b = iso(gx, gy + 0.7 + 0.8 + k * 0.5, 24 - k * 4);
+          ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        }
+        break;
+      case 'Sala de Jogos': { // mesa de ping-pong com bolinha
+        box(gx + 0.4, gy + 1.9, 1.7, 1.0, 6, '#1f6f4f', 0, f);
+        const n1 = iso(gx + 1.25, gy + 1.9, 6), n2 = iso(gx + 1.25, gy + 2.9, 6);
+        ctx.strokeStyle = '#e6edf3'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(n1[0], n1[1] - 2); ctx.lineTo(n2[0], n2[1] - 2); ctx.stroke();
+        if (!reduced) {
+          const u = (Math.sin(t * 2.2) + 1) / 2;
+          const p = iso(gx + 0.55 + u * 1.4, gy + 2.4, 9 + Math.abs(Math.sin(t * 4.4)) * 7);
+          ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, 7); ctx.fill();
+        }
+        break;
+      }
+      case 'Sua mesa / Aprovações': { // sino de aprovação
+        box(gx + 2.6, gy + 0.6, 0.45, 0.45, 12, '#c08a3e', 0, f);
+        if (st.waiting) {
+          const p = iso(gx + 2.82, gy + 0.82, 26);
+          const k = 0.5 + 0.5 * Math.sin(t * 8);
+          ctx.fillStyle = `rgba(240,136,62,${0.35 + 0.65 * k})`;
+          ctx.beginPath(); ctx.arc(p[0], p[1], 6, Math.PI, 0); ctx.lineTo(p[0] + 7, p[1] + 1); ctx.lineTo(p[0] - 7, p[1] + 1); ctx.fill();
+          ctx.beginPath(); ctx.arc(p[0], p[1] + 3, 1.8, 0, 7); ctx.fill();
+        }
+        break;
+      }
+      case 'Entrada': // porta e tapete
+        wallX(gx, gy, 1.3, 2.2, 0, 22, shade('#6e4b2a', Math.max(f, 0.8)));
+        { const k = iso(gx + 2.05, gy, 11); ctx.fillStyle = '#e3b341'; ctx.beginPath(); ctx.arc(k[0], k[1], 1.5, 0, 7); ctx.fill(); }
+        poly([iso(gx + 1.2, gy + 0.3), iso(gx + 2.3, gy + 0.3), iso(gx + 2.3, gy + 1.1), iso(gx + 1.2, gy + 1.1)], shade('#8b3a3a', Math.max(f, 0.8)));
+        break;
+      default: break;
+    }
+  }
+
   function drawLabel(i, hot) {
     const { gx, gy } = roomOrigin(i);
     const p = iso(gx + S, gy + S);
@@ -70,112 +230,296 @@
     ctx.fillStyle = hot ? '#fff' : '#c9d1d9'; ctx.fillText(ROOMS[i], p[0], p[1] + 19);
   }
 
-  // ------------------------------------------------------------ estado
-  const sprites = new Map(); // id -> sprite animado
+  // ================================================================ agentes
+  const sprites = new Map(); // id -> boneco animado
+  const particles = [];
   let agentList = [];
-  let colorN = 0;
 
+  const SLOTS = [[1.85, 2.0], [3.0, 1.0], [0.9, 2.9], [3.1, 2.8], [1.0, 1.4], [2.0, 3.2]];
   function slotFor(a, list) {
     const same = list.filter((x) => x.room === a.room);
-    const k = same.findIndex((x) => x.id === a.id);
-    const SLOTS = [[2.1, 2.3], [3.0, 1.0], [0.9, 2.9], [3.1, 2.8], [1.0, 1.4], [2.0, 3.2]];
+    const k = Math.max(0, same.findIndex((x) => x.id === a.id));
     const s = SLOTS[k % SLOTS.length];
     const o = roomOrigin(roomIdx(a.room));
     return { x: o.gx + s[0], y: o.gy + s[1], k };
+  }
+  const door = () => { const o = roomOrigin(roomIdx('Entrada')); return { x: o.gx + 1.75, y: o.gy + 0.35 }; };
+
+  function styleFor(s, a) {
+    const st = STYLE[a.role];
+    if (st) { s.shirt = st[0]; s.acc = st[1]; }
+    else if (!s.shirt) { s.shirt = '#8b949e'; s.acc = 'nenhum'; } // Recepção / Aguardando você mantêm a roupa anterior
+  }
+
+  function poof(x, y) {
+    if (reduced) return;
+    const [sx, sy] = iso(x, y);
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      particles.push({ kind: 'poof', x: sx, y: sy - 18, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, life: 0.7, max: 0.7, r: 4 });
+    }
+  }
+  function confetti(x, y) {
+    if (reduced) return;
+    const [sx, sy] = iso(x, y);
+    const cols = ['#3fb950', '#e3b341', '#4f8cff', '#f778ba', '#ff7b72', '#a371f7'];
+    for (let k = 0; k < 26; k++) {
+      particles.push({ kind: 'conf', x: sx, y: sy - 40, vx: (Math.random() - 0.5) * 120, vy: -60 - Math.random() * 90,
+        life: 1.6, max: 1.6, c: cols[k % cols.length], rot: Math.random() * 6, vr: (Math.random() - 0.5) * 12 });
+    }
   }
 
   function setAgents(list) {
     agentList = list;
     const ids = new Set(list.map((a) => a.id));
-    const entrada = roomOrigin(ROOMS.length - 1);
+    const ent = roomOrigin(roomIdx('Entrada'));
+    const now = performance.now() / 1000;
     for (const a of list) {
       let s = sprites.get(a.id);
       if (!s) {
         const parent = a.parent && sprites.get(a.parent);
-        s = { x: parent ? parent.x : entrada.gx + 1.7, y: parent ? parent.y : entrada.gy + 1.7, alpha: 0,
-          color: a.kind === 'main' ? PALETTE[colorN++ % PALETTE.length] : PALETTE[(colorN++ + 2) % PALETTE.length] };
+        const h = hash(a.id);
+        s = { x: parent ? parent.x : ent.gx + 1.75, y: parent ? parent.y : ent.gy + 0.6, alpha: reduced ? 1 : 0, dir: 1, away: false,
+          phase: 0, skin: SKIN[h % SKIN.length], hair: HAIR[(h >> 3) % HAIR.length], idColor: ID_COLORS[(h >> 5) % ID_COLORS.length],
+          jump: 0, say: null, sayT: 0, lastAction: null, lastStatus: null };
         sprites.set(a.id, s);
+        if (a.kind === 'sub') poof(s.x, s.y);
       }
+      styleFor(s, a);
+      if (s.lastStatus && s.lastStatus !== 'concluido' && a.status === 'concluido') { s.jump = 0.9; confetti(s.x, s.y); }
+      if (a.action && a.action !== s.lastAction && (a.status === 'trabalhando' || a.status === 'delegando')) { s.say = a.action; s.sayT = now; }
+      s.lastAction = a.action; s.lastStatus = a.status;
       Object.assign(s, { data: a, leaving: false });
       const tgt = slotFor(a, list); s.tx = tgt.x; s.ty = tgt.y; s.k = tgt.k;
+      if (reduced) { s.x = s.tx; s.y = s.ty; }
     }
-    for (const [id, s] of sprites) if (!ids.has(id)) s.leaving = true;
+    for (const [id, s] of sprites) if (!ids.has(id) && !s.leaving) {
+      s.leaving = true; s.leaveAt = now;
+      if (s.data && s.data.kind === 'sub') { const d = door(); s.tx = d.x; s.ty = d.y; } // sai andando pela porta
+    }
     renderAgents();
   }
 
-  function shortName(a) {
-    const r = a.role || a.name || 'Agente';
-    return r.length > 18 ? r.slice(0, 17) + '…' : r;
+  // ---------------------------------------------------------------- o boneco
+  function drawPerson(s, sx, sy, t, pose) {
+    const a = s.data;
+    const dir = s.dir;
+    const jumpY = s.jump > 0 ? Math.sin((1 - s.jump / 0.9) * Math.PI) * 14 : 0;
+    const sit = pose === 'sit';
+    const hipY = sy - (sit ? 6 : 9) - jumpY;
+    const top = hipY - 14;
+    const headY = top - 6;
+    const swing = pose === 'walk' && !reduced ? Math.sin(s.phase) : 0;
+
+    // sombra
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(sx, sy, 9, 4.5, 0, 0, 7); ctx.fill();
+
+    // pernas
+    ctx.strokeStyle = '#2d333b'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(sx + side * 3, hipY);
+      if (sit) ctx.lineTo(sx + side * 3, hipY + 5);
+      else ctx.lineTo(sx + side * 3 + swing * side * 4, sy - 1 - jumpY);
+      ctx.stroke();
+    }
+    // corpo
+    ctx.fillStyle = s.shirt; roundRect(sx - 6.5, top, 13, 15, 5); ctx.fill();
+    if (s.acc === 'gravata') { ctx.fillStyle = a.role === 'CEO / Estrategista' ? '#e3b341' : '#b62324'; poly([[sx - 1.5, top + 1], [sx + 1.5, top + 1], [sx + 2, top + 9], [sx, top + 11], [sx - 2, top + 9]], ctx.fillStyle); }
+
+    // braços
+    const shoulderY = top + 3;
+    ctx.strokeStyle = s.shirt; ctx.lineWidth = 3;
+    const hand = (side) => {
+      if (pose === 'wave' && side === dir) return [sx + side * 9, top - 9 + Math.sin(t * 10) * 3];
+      if (pose === 'sit' || pose === 'type') { const tap = reduced ? 0 : Math.sin(t * 22 + side * 1.7) * 1.3; return [sx + side * 4, top + 8 + tap]; }
+      return [sx + side * 7 - swing * side * 3, shoulderY + 9];
+    };
+    const hands = [];
+    for (const side of [-1, 1]) {
+      const h = hand(side); hands.push(h);
+      ctx.beginPath(); ctx.moveTo(sx + side * 5.5, shoulderY); ctx.lineTo(h[0], h[1]); ctx.stroke();
+    }
+    // objetos nas mãos
+    const mid = [(hands[0][0] + hands[1][0]) / 2, (hands[0][1] + hands[1][1]) / 2];
+    if (!sit && (pose === 'type' || s.acc === 'tablet' || s.acc === 'caderno' || s.acc === 'prancheta') && pose !== 'wave' && !s.away) {
+      const col = s.acc === 'caderno' ? '#f6f8fa' : s.acc === 'prancheta' ? '#b08a5a' : '#161b22';
+      ctx.fillStyle = col; roundRect(mid[0] - 5, mid[1] - 3, 10, 7, 1.5); ctx.fill();
+      if (s.acc === 'tablet') { ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(mid[0] - 3, mid[1] + 2); ctx.lineTo(mid[0], mid[1]); ctx.lineTo(mid[0] + 3, mid[1] - 1); ctx.stroke(); }
+      if (s.acc === 'caderno') { ctx.strokeStyle = '#8b949e'; ctx.lineWidth = 0.8; for (let k = 0; k < 2; k++) { ctx.beginPath(); ctx.moveTo(mid[0] - 3, mid[1] - 1 + k * 2.5); ctx.lineTo(mid[0] + 3, mid[1] - 1 + k * 2.5); ctx.stroke(); } }
+    }
+    for (const h of hands) { ctx.fillStyle = s.skin; ctx.beginPath(); ctx.arc(h[0], h[1], 1.8, 0, 7); ctx.fill(); }
+
+    // cabeça
+    ctx.fillStyle = s.skin; ctx.beginPath(); ctx.arc(sx, headY, 6.5, 0, 7); ctx.fill();
+    ctx.fillStyle = s.hair;
+    if (s.away) { ctx.beginPath(); ctx.arc(sx, headY, 6.6, 0, 7); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(sx, headY - 1, 6.6, Math.PI * 1.05, Math.PI * 1.95); ctx.fill(); }
+    if (!s.away) {
+      ctx.fillStyle = '#1b1f24';
+      const ex = sx + dir * 1.5;
+      if (pose === 'idle' && !reduced && Math.sin(t * 0.9 + hash(a.id)) > 0.97) { ctx.fillRect(ex - 3.5, headY, 2, 0.8); ctx.fillRect(ex + 1.5, headY, 2, 0.8); }
+      else { ctx.beginPath(); ctx.arc(ex - 2.5, headY + 0.5, 0.9, 0, 7); ctx.arc(ex + 2.5, headY + 0.5, 0.9, 0, 7); ctx.fill(); }
+      if (s.acc === 'oculos') { ctx.strokeStyle = '#1b1f24'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.arc(ex - 2.5, headY + 0.5, 2, 0, 7); ctx.moveTo(ex + 4.5, headY + 0.5); ctx.arc(ex + 2.5, headY + 0.5, 2, 0, 7); ctx.stroke(); }
+    }
+    if (s.acc === 'fone' || s.acc === 'headset') {
+      ctx.strokeStyle = '#1b1f24'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, headY, 7.5, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.fillStyle = s.acc === 'fone' ? '#f0883e' : '#1b1f24';
+      roundRect(sx - 8.5, headY - 1, 3, 5, 1); ctx.fill(); roundRect(sx + 5.5, headY - 1, 3, 5, 1); ctx.fill();
+      if (s.acc === 'headset' && !s.away) { ctx.strokeStyle = '#1b1f24'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx + 7 * dir, headY + 3); ctx.quadraticCurveTo(sx + 6 * dir, headY + 7, sx + 2 * dir, headY + 6); ctx.stroke(); }
+    }
+    return headY;
   }
 
-  function drawAgent(s, t) {
-    if (s.alpha <= 0.01) return;
+  function drawStatusIcon(s, sx, by, t) {
     const a = s.data;
-    const [sx, sy] = iso(s.x, s.y);
-    const moving = Math.hypot(s.tx - s.x, s.ty - s.y) > 0.05;
-    const bob = moving ? Math.abs(Math.sin(t * 12)) * 3 : Math.sin(t * 2) * 0.6;
-    ctx.globalAlpha = s.alpha;
-    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(sx, sy, 9, 4.5, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = s.color; roundRect(sx - 7, sy - 22 - bob, 14, 18, 5); ctx.fill();
-    ctx.fillStyle = '#f1d3b3'; ctx.beginPath(); ctx.arc(sx, sy - 29 - bob, 7, 0, 7); ctx.fill();
     const col = (STAT[a.status] || STAT.ocioso)[0];
-    const by = sy - 52 - bob;
     if (a.status === 'aguardando') {
       const k = 1 + 0.15 * Math.sin(t * 8);
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, by, 11 * k, 0, 7); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', sx, by + 5);
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, by, 10 * k, 0, 7); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', sx, by + 5);
     } else if (a.status === 'concluido') {
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, by, 10, 0, 7); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(sx - 5, by); ctx.lineTo(sx - 1, by + 4); ctx.lineTo(sx + 5, by - 4); ctx.stroke();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, by, 9, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(sx - 4.5, by); ctx.lineTo(sx - 1, by + 3.5); ctx.lineTo(sx + 4.5, by - 3.5); ctx.stroke();
     } else if (a.status === 'ocioso') {
       ctx.fillStyle = col; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('z', sx + 6, by + 6 - ((t * 8) % 6)); ctx.fillText('Z', sx + 12, by - 2 - ((t * 8 + 3) % 6));
+      const m = reduced ? 0 : (t * 8) % 6;
+      ctx.fillText('z', sx + 6, by + 6 - m); ctx.fillText('Z', sx + 12, by - 2 - ((m + 3) % 6));
     } else {
-      ctx.fillStyle = col; roundRect(sx - 17, by - 9, 34, 18, 9); ctx.fill();
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = col; roundRect(sx - 15, by - 8, 30, 16, 8); ctx.fill();
       for (let k = 0; k < 3; k++) {
-        ctx.globalAlpha = s.alpha * ((Math.floor(t * 4) % 3) === k ? 1 : 0.45);
-        ctx.beginPath(); ctx.arc(sx - 8 + k * 8, by, 2.6, 0, 7); ctx.fill();
+        ctx.globalAlpha = s.alpha * ((Math.floor(t * 4) % 3) === k || reduced ? 1 : 0.45);
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sx - 7 + k * 7, by, 2.3, 0, 7); ctx.fill();
       }
       ctx.globalAlpha = s.alpha;
     }
-    const label = shortName(a);
+  }
+
+  function drawSay(s, sx, by, t) {
+    const age = t - s.sayT;
+    if (!s.say || age > 2.8) return false;
+    const fade = Math.min(1, age / 0.2, (2.8 - age) / 0.4);
+    ctx.save(); ctx.globalAlpha = s.alpha * fade;
+    ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'center';
+    const txt = s.say.length > 26 ? s.say.slice(0, 25) + '…' : s.say;
+    const w = ctx.measureText(txt).width + 14, y = by - 4 - (reduced ? 0 : (1 - fade) * 4);
+    ctx.fillStyle = '#f6f8fa'; roundRect(sx - w / 2, y - 12, w, 18, 8); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sx - 4, y + 6); ctx.lineTo(sx, y + 11); ctx.lineTo(sx + 4, y + 6); ctx.fill();
+    ctx.fillStyle = '#1b1f24'; ctx.fillText(txt, sx, y + 1);
+    ctx.restore();
+    return true;
+  }
+
+  function drawAgent(s, t) {
+    if (s.alpha <= 0.01 || !s.data) return;
+    const a = s.data;
+    const [sx, sy0] = iso(s.x, s.y);
+    const moving = Math.hypot(s.tx - s.x, s.ty - s.y) > 0.05;
+    const busy = a.status === 'trabalhando' || a.status === 'delegando';
+    const atDesk = !moving && s.k === 0 && busy && a.room !== 'Entrada' && a.room !== 'Sua mesa / Aprovações';
+    let pose = 'idle';
+    if (moving) pose = 'walk';
+    else if (a.status === 'aguardando') pose = 'wave';
+    else if (atDesk) pose = 'sit';
+    else if (busy) pose = 'type';
+    s.away = moving ? s.awayWalk : atDesk;
+    const bob = pose === 'idle' && !reduced ? Math.sin(t * 2 + hash(a.id)) * 0.6 : 0;
+    const sy = sy0 + bob;
+
+    ctx.globalAlpha = s.alpha;
+    const headY = drawPerson(s, sx, sy, t, pose);
+    const by = headY - 18;
+    if (!drawSay(s, sx, by, t)) drawStatusIcon(s, sx, by, t);
+
+    // nome
+    const label = a.role ? (a.role.length > 18 ? a.role.slice(0, 17) + '…' : a.role) : a.name;
+    const ly = sy0 + 15 + ((s.k || 0) % 2) * 12;
     ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff';
-    const ly = sy + 15 + ((s.k || 0) % 2) * 12;
     ctx.strokeText(label, sx, ly); ctx.fillText(label, sx, ly);
     ctx.globalAlpha = 1;
   }
 
+  function bezier(p0, p1, p2, u) {
+    const v = 1 - u;
+    return [v * v * p0[0] + 2 * v * u * p1[0] + u * u * p2[0], v * v * p0[1] + 2 * v * u * p1[1] + u * u * p2[1]];
+  }
   function drawLinks(t) {
     for (const s of sprites.values()) {
-      const a = s.data; if (!a.parent || s.alpha < 0.1) continue;
-      const p = sprites.get(a.parent); if (!p || p.data.status !== 'delegando') continue;
+      const a = s.data; if (!a || !a.parent || s.alpha < 0.1 || s.leaving) continue;
+      const p = sprites.get(a.parent); if (!p || !p.data || p.data.status !== 'delegando') continue;
       const [x1, y1] = iso(p.x, p.y), [x2, y2] = iso(s.x, s.y);
-      ctx.save(); ctx.strokeStyle = 'rgba(163,113,247,.85)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -t * 30;
-      ctx.beginPath(); ctx.moveTo(x1, y1 - 20); ctx.quadraticCurveTo((x1 + x2) / 2, Math.min(y1, y2) - 70, x2, y2 - 20); ctx.stroke(); ctx.restore();
+      const P0 = [x1, y1 - 24], P1 = [(x1 + x2) / 2, Math.min(y1, y2) - 75], P2 = [x2, y2 - 24];
+      ctx.save(); ctx.strokeStyle = 'rgba(163,113,247,.7)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.lineDashOffset = reduced ? 0 : -t * 30;
+      ctx.beginPath(); ctx.moveTo(P0[0], P0[1]); ctx.quadraticCurveTo(P1[0], P1[1], P2[0], P2[1]); ctx.stroke(); ctx.restore();
+      // pacotes de trabalho viajando
+      for (let k = 0; k < 3; k++) {
+        const u = reduced ? (k + 1) / 4 : ((t * 0.45 + k / 3) % 1);
+        const q = bezier(P0, P1, P2, u);
+        ctx.fillStyle = '#d2a8ff'; ctx.save(); ctx.translate(q[0], q[1]); ctx.rotate(reduced ? 0 : t * 3 + k);
+        ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+      }
     }
   }
 
+  function drawParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
+      const k = p.life / p.max;
+      if (p.kind === 'poof') {
+        p.x += p.vx * dt; p.y += p.vy * dt; p.r += 14 * dt;
+        ctx.fillStyle = `rgba(201,209,217,${0.55 * k})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+      } else {
+        p.vy += 220 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+        ctx.save(); ctx.globalAlpha = Math.min(1, k * 1.5); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.c; ctx.fillRect(-2.5, -1.5, 5, 3); ctx.restore();
+      }
+    }
+  }
+
+  // ================================================================ laço de animação
   let last = performance.now() / 1000;
   function frame() {
     const t = performance.now() / 1000, dt = Math.min(0.05, t - last); last = t;
+
     for (const [id, s] of sprites) {
-      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), sp = 4.2 * dt;
-      if (d > sp) { s.x += (dx / d) * sp; s.y += (dy / d) * sp; } else { s.x = s.tx; s.y = s.ty; }
-      if (s.leaving) { s.alpha -= dt * 1.2; if (s.alpha <= 0) sprites.delete(id); } else s.alpha = Math.min(1, s.alpha + dt * 2);
+      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), sp = 3.4 * dt;
+      if (d > sp) {
+        s.x += (dx / d) * sp; s.y += (dy / d) * sp; s.phase += dt * 11;
+        const sdx = dx - dy, sdy = dx + dy;          // direção na tela
+        if (Math.abs(sdx) > 0.01) s.dir = sdx > 0 ? 1 : -1;
+        s.awayWalk = sdy < 0;
+      } else { s.x = s.tx; s.y = s.ty; }
+      if (s.jump > 0) s.jump = Math.max(0, s.jump - dt);
+      if (s.leaving) {
+        const arrived = d <= sp || !(s.data && s.data.kind === 'sub');
+        if (arrived || t - s.leaveAt > 6) { s.alpha -= dt * 1.5; if (s.alpha <= 0) { sprites.delete(id); continue; } }
+      } else s.alpha = Math.min(1, s.alpha + dt * 2.5);
     }
+
+    // luz das salas
+    const busyRooms = new Set(), litRooms = new Set();
+    for (const a of agentList) {
+      if (a.status !== 'ocioso') busyRooms.add(roomIdx(a.room));
+      if (a.status === 'trabalhando' || a.status === 'delegando') litRooms.add(roomIdx(a.room));
+    }
+    for (let i = 0; i < ROOMS.length; i++) {
+      const target = busyRooms.has(i) ? 1.08 : 0.78;
+      light[i] = reduced ? target : lerp(light[i], target, Math.min(1, dt * 3));
+    }
+
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.setTransform(scale, 0, 0, scale, offX, offY);
     const waiting = agentList.some((a) => a.status === 'aguardando');
     const hotIdx = waiting ? roomIdx('Sua mesa / Aprovações') : -1;
-    for (let i = 0; i < ROOMS.length; i++) drawRoom(i, t, i === hotIdx);
+    for (let i = 0; i < ROOMS.length; i++) drawRoom(i, t, { hot: i === hotIdx, lit: litRooms.has(i), waiting: waiting && i === hotIdx });
     for (let i = 0; i < ROOMS.length; i++) drawLabel(i, i === hotIdx);
     drawLinks(t);
     [...sprites.values()].sort((a, b) => a.x + a.y - (b.x + b.y)).forEach((s) => drawAgent(s, t));
+    drawParticles(dt);
     requestAnimationFrame(frame);
   }
 
-  // ------------------------------------------------------------ painel lateral (sem innerHTML com dados)
+  // ================================================================ painel lateral (sem innerHTML com dados)
   const elAgents = document.getElementById('agents');
   const elLog = document.getElementById('log');
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -186,7 +530,7 @@
     for (const a of agentList) {
       const [c, label] = STAT[a.status] || STAT.ocioso;
       const row = el('div', 'ag' + (a.status === 'aguardando' ? ' wait' : ''));
-      const dot = el('div', 'dot'); dot.style.background = (sprites.get(a.id) || {}).color || c;
+      const dot = el('div', 'dot'); dot.style.background = (sprites.get(a.id) || {}).shirt || c;
       const title = el('div'); title.append(el('b', null, a.role || a.name), el('span', 'room', ' ' + (a.tag || '')));
       const nm = el('div', 'nm'); nm.append(title, el('div', 'act', a.action || ''), el('div', 'room', a.room + (a.kind === 'sub' ? ' · subagente' : '')));
       const chip = el('div', 'chip', label); chip.style.background = c + '22'; chip.style.color = c;
@@ -207,7 +551,7 @@
     while (elLog.children.length > 150) elLog.lastChild.remove();
   }
 
-  // ------------------------------------------------------------ tempo real
+  // ================================================================ tempo real
   const live = document.getElementById('live');
   function setLive(state, text) { live.className = state; live.querySelector('span').textContent = text; }
 
