@@ -225,7 +225,7 @@ const ROLE = {
   'Produto': 'Pesquisador de Produto', 'Aquisição': 'Captador de Leads', 'Vendas': 'Vendedor',
   'Follow-up / CRM': 'Atendente de CRM', 'Copy': 'Copywriter', 'Landing Pages': 'Designer de Páginas',
   'Tráfego': 'Gestor de Tráfego', 'Pós-venda': 'Suporte ao Cliente', 'Curso IA Professores': 'Professor de IA',
-  'Sala de Jogos': 'Testador', 'Sua mesa / Aprovações': 'Aguardando você', 'Entrada': 'Recepção',
+  'Sala de Jogos': 'Testador', 'Sua mesa / Aprovações': 'Aguardando você', 'Entrada': 'Em espera',
 };
 // Função dos subagentes conforme o tipo que o Claude Code informa.
 const SUBROLE = {

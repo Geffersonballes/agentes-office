@@ -2,7 +2,7 @@
 (() => {
   // ================================================================ base do desenho
   const W = 960, H = 560;                // coordenadas lógicas
-  const TW = 44, TH = 22, S = 3.5, OX = 372, OY = 92, WALL = 30;
+  const TW = 44, TH = 22, S = 3.5, OX = 372, OY = 92, WALL = 40;
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
   let scale = 1, offX = 0, offY = 0;
@@ -29,6 +29,10 @@
   const HAIR = ['#2b1d14', '#4a3222', '#1b1b1b', '#8a5a2b', '#d6b370', '#5b2b2b'];
   const ID_COLORS = ['#4f8cff', '#e3b341', '#a371f7', '#3fb950', '#ff7b72', '#39c5cf', '#f778ba', '#d29922'];
 
+  const DISPLAY = { 'Entrada': 'Sala de Espera' };
+  const dispName = (n) => DISPLAY[n] || n;
+  const LEISURE = new Set(['play', 'coffee', 'chess', 'cards', 'phone', 'magazine', 'videogame', 'darts']);
+  const SITTING = new Set(['sit', 'chess', 'cards', 'phone', 'magazine', 'videogame']);
   const roomIdx = (name) => { const i = ROOMS.indexOf(name); return i < 0 ? ROOMS.length - 1 : i; };
   const roomOrigin = (i) => ({ gx: (i % 5) * 5, gy: Math.floor(i / 5) * 5 });
   const iso = (x, y, z = 0) => [(x - y) * TW / 2 + OX, (x + y) * TH / 2 + OY - z];
@@ -80,14 +84,20 @@
     poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy + S), iso(gx, gy + S)], floor, '#3a4250');
     poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy, WALL), iso(gx, gy, WALL)], shade(tint, 1.25 * L));
     poly([iso(gx, gy), iso(gx, gy + S), iso(gx, gy + S, WALL), iso(gx, gy, WALL)], shade(tint, 1.05 * L));
+    drawSign(gx, gy, dispName(name), st.hot, L);
     // porta (no lado direito da sala, para o corredor)
     poly([iso(gx + S - 0.05, gy + 1.35), iso(gx + S + 0.35, gy + 1.35), iso(gx + S + 0.35, gy + 2.15), iso(gx + S - 0.05, gy + 2.15)], shade('#6e4b2a', Math.max(L, 0.85)));
     themed(i, name, gx, gy, t, st, L);
-    if (name !== 'Entrada') {
-      box(gx + 1.3, gy + 0.8, 1.1, 0.6, 9, '#8a6d4f', 0, L);                 // mesa
-      box(gx + 1.55, gy + 0.85, 0.6, 0.12, 7, '#20262e', 9, L);              // monitor
-      screen(gx + 1.55, gy + 0.97, 0.6, 10, 15, st.lit, t, i);
-      box(gx + 1.62, gy + 1.75, 0.45, 0.4, 5, '#3d444d', 0, L);              // cadeira
+    if (name !== 'Entrada' && name !== 'Sala de Jogos') {
+      // estações de trabalho: mesa, computador e cadeira (o agente senta na cadeira de frente para o monitor)
+      WORKSTATIONS.forEach((w, k) => {
+        box(gx + w.desk[0], gy + w.desk[1], w.desk[2], 0.6, 9, '#8a6d4f', 0, L);
+        box(gx + w.desk[0] + 0.22, gy + w.desk[1] + 0.05, 0.6, 0.12, 7, '#20262e', 9, L);
+        screen(gx + w.desk[0] + 0.22, gy + w.desk[1] + 0.17, 0.6, 10, 15, st.lit && (st.busySeats || 0) > k, t, i * 3 + k);
+        box(gx + w.desk[0] + 0.12, gy + w.desk[1] + 0.12, 0.25, 0.15, 3, '#30363d', 9, L);        // teclado
+        box(gx + w.seat[0] - 0.22, gy + w.seat[1] - 0.25, 0.45, 0.4, 5, '#3d444d', 0, L);      // assento
+        box(gx + w.seat[0] - 0.22, gy + w.seat[1] + 0.1, 0.45, 0.1, 13, '#3d444d', 0, L);      // encosto
+      });
     }
   }
 
@@ -190,8 +200,8 @@
         break;
       }
       case 'Produto': // planta
-        box(gx + 0.3, gy + 2.6, 0.4, 0.4, 5, '#8a5a2b', 0, f);
-        ctx.fillStyle = shade('#2ea043', f); { const p = iso(gx + 0.5, gy + 2.8, 13); ctx.beginPath(); ctx.ellipse(p[0], p[1], 9, 7, 0, 0, 7); ctx.fill(); }
+        box(gx + 3.0, gy + 0.2, 0.35, 0.35, 5, '#8a5a2b', 0, f);
+        ctx.fillStyle = shade('#2ea043', f); { const p = iso(gx + 3.17, gy + 0.37, 13); ctx.beginPath(); ctx.ellipse(p[0], p[1], 9, 7, 0, 0, 7); ctx.fill(); }
         break;
       case 'Aquisição': { // funil na parede
         const a = iso(gx, gy + 0.8, 26), b = iso(gx, gy + 2.6, 26), c = iso(gx, gy + 1.7, 12);
@@ -218,10 +228,9 @@
         }
         break;
       }
-      case 'Landing Pages': // segundo monitor
-        box(gx + 0.45, gy + 0.8, 0.75, 0.6, 9, '#8a6d4f', 0, f);
-        box(gx + 0.5, gy + 0.85, 0.6, 0.12, 7, '#20262e', 9, f);
-        screen(gx + 0.5, gy + 0.97, 0.6, 10, 15, st.lit, t + 1, i + 3);
+      case 'Landing Pages': // wireframes na parede
+        wallY(gx, gy, 0.6, 1.5, 13, 25, shade('#f6f8fa', f)); wallY(gx, gy, 0.7, 1.4, 21, 24, shade('#db61a2', f)); wallY(gx, gy, 0.7, 1.4, 14, 19, shade('#c9d1d9', f));
+        wallY(gx, gy, 1.8, 2.7, 13, 25, shade('#f6f8fa', f)); wallY(gx, gy, 1.9, 2.6, 21, 24, shade('#388bfd', f)); wallY(gx, gy, 1.9, 2.6, 14, 19, shade('#c9d1d9', f));
         break;
       case 'Tráfego': { // telão com gráfico subindo
         wallX(gx, gy, 0.3, 2.9, 11, 28, shade('#0d1117', Math.max(f, 0.8)));
@@ -249,15 +258,37 @@
           ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
         }
         break;
-      case 'Sala de Jogos': { // mesa de ping-pong com bolinha
-        box(gx + 0.4, gy + 1.9, 1.7, 1.0, 6, '#1f6f4f', 0, f);
-        const n1 = iso(gx + 1.25, gy + 1.9, 6), n2 = iso(gx + 1.25, gy + 2.9, 6);
-        ctx.strokeStyle = '#e6edf3'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(n1[0], n1[1] - 2); ctx.lineTo(n2[0], n2[1] - 2); ctx.stroke();
+      case 'Sala de Jogos': {
+        // videogame: TV na parede do fundo e dois pufes
+        wallX(gx, gy, 1.75, 3.25, 8, 24, '#0b0f14');
+        if (!reduced || true) {
+          const cols = ['#ff7b72', '#e3b341', '#3fb950', '#4f8cff', '#a371f7'];
+          for (let k = 0; k < 5; k++) {
+            const u = 1.85 + ((k * 0.27 + (reduced ? 0 : t * 0.35)) % 1.25);
+            const z = 11 + ((k * 5 + (reduced ? 0 : Math.floor(t * 2) * 3)) % 10);
+            wallX(gx, gy, u, u + 0.12, z, z + 2.5, cols[k]);
+          }
+        }
+        for (const [bx, by, col] of [[2.1, 1.15, '#8957e5'], [2.85, 1.15, '#d29922']]) {
+          const c = iso(gx + bx, gy + by, 0); ctx.fillStyle = shade(col, f); ctx.beginPath(); ctx.ellipse(c[0], c[1] - 3, 10, 6, 0, 0, 7); ctx.fill();
+        }
+        // dardos na parede da esquerda
+        { const c = iso(gx, gy + 0.75, 18);
+          const rings = ['#1b1f24', '#f6f8fa', '#d1242f', '#f6f8fa', '#2ea043'];
+          rings.forEach((col, k) => { ctx.fillStyle = shade(col, Math.max(f, 0.8)); ctx.beginPath(); ctx.ellipse(c[0], c[1], 6.5 - k * 1.2, 8 - k * 1.5, -0.45, 0, 7); ctx.fill(); });
+          ctx.strokeStyle = '#e3b341'; ctx.lineWidth = 1; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(c[0] - 1 + k * 1.5, c[1] - 1 + k); ctx.lineTo(c[0] + 2 + k * 1.5, c[1] + 1 + k); ctx.stroke(); } }
+        // ping-pong com bolinha
+        box(gx + 0.3, gy + 2.1, 1.65, 0.8, 6, '#1f6f4f', 0, f);
+        { const n1 = iso(gx + 1.12, gy + 2.1, 6), n2 = iso(gx + 1.12, gy + 2.9, 6);
+          ctx.strokeStyle = '#e6edf3'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(n1[0], n1[1] - 2); ctx.lineTo(n2[0], n2[1] - 2); ctx.stroke(); }
         if (!reduced) {
           const u = (Math.sin(t * 2.2) + 1) / 2;
-          const p = iso(gx + 0.55 + u * 1.4, gy + 2.4, 9 + Math.abs(Math.sin(t * 4.4)) * 7);
+          const p = iso(gx + 0.4 + u * 1.45, gy + 2.5, 9 + Math.abs(Math.sin(t * 4.4)) * 7);
           ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, 7); ctx.fill();
         }
+        // máquina de café
+        box(gx + 3.05, gy + 2.35, 0.32, 0.3, 12, '#30363d', 0, f);
+        { const p = iso(gx + 3.2, gy + 2.65, 8); ctx.fillStyle = '#f0883e'; ctx.fillRect(p[0] - 1.5, p[1] - 1.5, 3, 3); }
         break;
       }
       case 'Sua mesa / Aprovações': { // sino de aprovação
@@ -271,45 +302,126 @@
         }
         break;
       }
-      case 'Entrada': // porta e tapete
-        wallX(gx, gy, 1.3, 2.2, 0, 22, shade('#6e4b2a', Math.max(f, 0.8)));
-        { const k = iso(gx + 2.05, gy, 11); ctx.fillStyle = '#e3b341'; ctx.beginPath(); ctx.arc(k[0], k[1], 1.5, 0, 7); ctx.fill(); }
-        poly([iso(gx + 1.2, gy + 0.3), iso(gx + 2.3, gy + 0.3), iso(gx + 2.3, gy + 1.1), iso(gx + 1.2, gy + 1.1)], shade('#8b3a3a', Math.max(f, 0.8)));
+      case 'Entrada': { // Sala de Espera: porta, cadeiras, xadrez e cartas
+        wallX(gx, gy, 1.3, 2.2, 0, 24, shade('#6e4b2a', Math.max(f, 0.8)));
+        { const k = iso(gx + 2.05, gy, 12); ctx.fillStyle = '#e3b341'; ctx.beginPath(); ctx.arc(k[0], k[1], 1.5, 0, 7); ctx.fill(); }
+        poly([iso(gx + 1.4, gy + 0.15), iso(gx + 2.1, gy + 0.15), iso(gx + 2.1, gy + 0.65), iso(gx + 1.4, gy + 0.65)], shade('#8b3a3a', Math.max(f, 0.8)));
+        // quadro na parede
+        wallY(gx, gy, 1.2, 2.4, 14, 26, shade('#30363d', Math.max(f, 0.8)));
+        wallY(gx, gy, 1.35, 2.25, 16, 24, shade('#388bfd', Math.max(f, 0.8)));
+        // cadeiras encostadas na parede da esquerda
+        for (const y of [0.7, 1.3, 1.9, 2.5, 3.1]) { box(gx + 0.12, gy + y - 0.2, 0.42, 0.4, 5, '#3d444d', 0, f); box(gx + 0.05, gy + y - 0.2, 0.12, 0.4, 12, '#3d444d', 0, f); }
+        // mesa de xadrez
+        stool(gx + 1.6, gy + 1.8, f); stool(gx + 1.6, gy + 2.95, f);
+        box(gx + 1.3, gy + 2.1, 0.6, 0.6, 7, '#6e4b2a', 0, f);
+        checker(gx + 1.33, gy + 2.13, 4, 0.54, 7, '#e6edf3', '#30363d', Math.max(f, 0.85));
+        { const mv = reduced ? 0 : (Math.floor(t / 3) % 4) * 0.13;
+          for (const [px, py, col] of [[1.42 + mv, 2.2, '#f6f8fa'], [1.7, 2.3, '#f6f8fa'], [1.5, 2.55, '#1b1f24'], [1.78 - mv * 0.6, 2.6, '#1b1f24']]) {
+            const c = iso(gx + px, gy + py, 7); ctx.fillStyle = col; ctx.fillRect(c[0] - 1.2, c[1] - 4, 2.4, 4); ctx.beginPath(); ctx.arc(c[0], c[1] - 4.5, 1.4, 0, 7); ctx.fill(); } }
+        // mesa de cartas
+        stool(gx + 2.8, gy + 1.45, f); stool(gx + 2.8, gy + 2.6, f);
+        box(gx + 2.5, gy + 1.75, 0.6, 0.55, 7, '#1f6f4f', 0, f);
+        for (let k = 0; k < 4; k++) { const c = iso(gx + 2.62 + k * 0.1, gy + 1.95 + (k % 2) * 0.12, 7.2); ctx.fillStyle = k === 3 ? '#d1242f' : '#f6f8fa'; ctx.fillRect(c[0] - 1.6, c[1] - 1.2, 3.2, 2.4); }
+        // planta
+        box(gx + 3.05, gy + 0.25, 0.3, 0.3, 5, '#8a5a2b', 0, f);
+        ctx.fillStyle = shade('#2ea043', f); { const p = iso(gx + 3.2, gy + 0.4, 12); ctx.beginPath(); ctx.ellipse(p[0], p[1], 7, 6, 0, 0, 7); ctx.fill(); }
         break;
+      }
       default: break;
     }
   }
 
-  function drawLabel(i, hot) {
-    const { gx, gy } = roomOrigin(i);
-    const p = iso(gx + S, gy + S);
-    ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'center';
-    const w = ctx.measureText(ROOMS[i]).width + 14;
-    ctx.fillStyle = hot ? 'rgba(240,136,62,.9)' : 'rgba(13,17,23,.85)';
-    roundRect(p[0] - w / 2, p[1] + 5, w, 19, 9); ctx.fill();
-    ctx.fillStyle = hot ? '#fff' : '#c9d1d9'; ctx.fillText(ROOMS[i], p[0], p[1] + 19);
+  // placa com o nome da sala, na parede do fundo (texto inclinado no plano da parede)
+  function drawSign(gx, gy, text, hot, L) {
+    const ux = TW / 2, uy = TH / 2, len = Math.hypot(ux, uy);
+    const c = iso(gx + S / 2, gy, WALL - 5);
+    ctx.save();
+    ctx.transform(ux / len, uy / len, 0, 1, c[0], c[1]);
+    const maxW = S * len - 12;
+    let size = 11, lines = [text];
+    ctx.font = `700 ${size}px system-ui, sans-serif`;
+    while (ctx.measureText(text).width > maxW && size > 8.5) { size -= 0.5; ctx.font = `700 ${size}px system-ui, sans-serif`; }
+    if (ctx.measureText(text).width > maxW) {
+      const words = text.split(' '); let best = 1, diff = 1e9;
+      for (let k = 1; k < words.length; k++) { const a = words.slice(0, k).join(' '), b = words.slice(k).join(' '); const d = Math.abs(a.length - b.length); if (d < diff) { diff = d; best = k; } }
+      lines = [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+      size = 8.5; ctx.font = `700 ${size}px system-ui, sans-serif`;
+    }
+    const w = Math.min(maxW + 8, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 12);
+    const h = lines.length * (size + 2) + 5;
+    ctx.fillStyle = hot ? 'rgba(240,136,62,.95)' : `rgba(13,17,23,${0.55 + 0.3 * Math.min(1, L)})`;
+    roundRect(-w / 2, -h / 2, w, h, 4); ctx.fill();
+    ctx.strokeStyle = hot ? 'rgba(255,255,255,.6)' : 'rgba(201,209,217,.25)'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = hot ? '#fff' : '#e6edf3'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    lines.forEach((l, k) => ctx.fillText(l, 0, (k - (lines.length - 1) / 2) * (size + 2) + 0.5));
+    ctx.restore();
   }
+  function checker(x, y, n, sz, z, a, b, f) {
+    const c = sz / n;
+    for (let r = 0; r < n; r++) for (let q = 0; q < n; q++) {
+      const x0 = x + q * c, y0 = y + r * c;
+      poly([iso(x0, y0, z), iso(x0 + c, y0, z), iso(x0 + c, y0 + c, z), iso(x0, y0 + c, z)], shade((r + q) % 2 ? a : b, f));
+    }
+  }
+  const stool = (x, y, f, col = '#6e4b2a') => box(x - 0.15, y - 0.15, 0.3, 0.3, 4, col, 0, f);
 
   // ================================================================ agentes
   const sprites = new Map(); // id -> boneco animado
   const particles = [];
   let agentList = [];
 
-  const SLOTS = [[1.85, 2.0], [3.0, 1.0], [0.9, 2.9], [3.1, 2.8], [1.0, 1.4], [2.0, 3.2]];
-  // na Sala de Jogos: os dois primeiros jogam ping-pong, os outros tomam café
-  const GAME_SLOTS = [[0.1, 2.45], [2.4, 2.35], [3.0, 1.0], [1.0, 1.1], [3.1, 3.0], [2.0, 3.2]];
+  // 3 estações por sala de trabalho; quem passar disso trabalha em pé
+  const WORKSTATIONS = [
+    { desk: [1.3, 0.8, 1.1], seat: [1.85, 1.95] },
+    { desk: [0.2, 0.8, 0.95], seat: [0.7, 1.95] },
+    { desk: [2.15, 2.25, 1.1], seat: [2.7, 3.25] },
+  ];
+  const SLOTS = [...WORKSTATIONS.map((w) => w.seat), [3.1, 1.0], [1.4, 3.2], [0.5, 3.1]];
+  // Sala de Jogos: ping-pong, videogame, dardos e café
+  const GAME_SLOTS = [
+    { p: [0.15, 2.5], pose: 'play', dir: 1 }, { p: [2.15, 2.5], pose: 'play', dir: -1 },
+    { p: [2.1, 1.2], pose: 'videogame', dir: 1, away: true }, { p: [2.85, 1.2], pose: 'videogame', dir: -1, away: true },
+    { p: [1.15, 0.95], pose: 'darts', dir: -1, away: true },
+    { p: [3.0, 3.05], pose: 'coffee', dir: -1 }, { p: [2.4, 3.2], pose: 'coffee', dir: 1 },
+  ];
+  // Sala de Espera (Entrada): xadrez, cartas e cadeiras com celular ou revista
+  const WAIT_SLOTS = [
+    { p: [1.6, 1.8], pose: 'chess', dir: 1 }, { p: [1.6, 2.95], pose: 'chess', dir: -1, away: true },
+    { p: [2.8, 1.45], pose: 'cards', dir: 1 }, { p: [2.8, 2.6], pose: 'cards', dir: -1, away: true },
+    { p: [0.38, 0.7], pose: 'phone', dir: 1 }, { p: [0.38, 1.3], pose: 'magazine', dir: 1 }, { p: [0.38, 1.9], pose: 'phone', dir: 1 },
+    { p: [0.38, 2.5], pose: 'magazine', dir: 1 }, { p: [0.38, 3.1], pose: 'phone', dir: 1 },
+  ];
   // Pré-visualização opcional pela URL: ?pausa=10 (segundos até ir para a Sala de Jogos) e ?hora=23 (hora de Brasília)
   const QS = new URLSearchParams(location.search);
   const IDLE_TO_GAMES_MS = QS.has('pausa') ? Math.max(1, Number(QS.get('pausa')) || 180) * 1000 : 3 * 60e3;
-  const effRoom = (a, s) => (a.status === 'ocioso' && s && s.idleSince && Date.now() - s.idleSince > IDLE_TO_GAMES_MS ? 'Sala de Jogos' : a.room);
+  // Ociosos ficam na Sala de Espera. Depois de um tempo, eles se revezam: metade vai para a Sala de Jogos
+  // (troca a cada 10 min), respeitando as vagas de cada sala.
+  const TURN_MS = QS.has('pausa') ? IDLE_TO_GAMES_MS * 3 : 10 * 60e3;
+  function assignRooms() {
+    const idle = [];
+    for (const a of agentList) {
+      const s = sprites.get(a.id); if (!s) continue;
+      s.assigned = a.room;
+      if (a.status === 'ocioso' && s.idleSince && Date.now() - s.idleSince >= IDLE_TO_GAMES_MS) idle.push([a, s]);
+    }
+    idle.sort((p, q) => (hash(p[0].id + 'x') % 997) - (hash(q[0].id + 'x') % 997) || (p[0].id < q[0].id ? -1 : 1));
+    const turn = Math.floor(Date.now() / TURN_MS);
+    let games = 0;
+    idle.forEach(([, s], i) => {
+      if ((i + turn) % 2 === 0 && games < GAME_SLOTS.length) { s.assigned = 'Sala de Jogos'; games++; }
+    });
+  }
+  const effRoom = (a, s) => (s && s.assigned) || a.room;
   function slotFor(a, list) {
     const room = effRoom(a, sprites.get(a.id));
     const same = list.filter((x) => effRoom(x, sprites.get(x.id)) === room);
     const k = Math.max(0, same.findIndex((x) => x.id === a.id));
     const game = room === 'Sala de Jogos' && a.status === 'ocioso';
-    const sl = (game ? GAME_SLOTS : SLOTS)[k % SLOTS.length];
     const o = roomOrigin(roomIdx(room));
-    return { x: o.gx + sl[0], y: o.gy + sl[1], k, room, game };
+    const list2 = game ? GAME_SLOTS : room === 'Entrada' ? WAIT_SLOTS : null;
+    if (list2) { const sl = list2[k % list2.length]; return { x: o.gx + sl.p[0], y: o.gy + sl.p[1], k, room, game, leisure: sl }; }
+    const sl = SLOTS[k % SLOTS.length];
+    return { x: o.gx + sl[0], y: o.gy + sl[1], k, room, game, leisure: null };
   }
   const door = () => { const o = roomOrigin(roomIdx('Entrada')); return { x: o.gx + 1.75, y: o.gy + 0.2 }; };
 
@@ -395,20 +507,25 @@
     }
     renderAgents();
   }
+  let lastAssign = '';
   function relayout() {
+    assignRooms();
+    const sig = agentList.map((a) => a.id + '=' + ((sprites.get(a.id) || {}).assigned || '')).join('|');
+    if (sig !== lastAssign) { lastAssign = sig; if (typeof renderAgents === 'function') setTimeout(renderAgents, 0); }
     for (const a of agentList) {
       const s = sprites.get(a.id); if (!s) continue;
-      const tgt = slotFor(a, agentList); s.k = tgt.k; s.game = tgt.game; s.effRoom = tgt.room;
+      const tgt = slotFor(a, agentList); s.k = tgt.k; s.game = tgt.game; s.effRoom = tgt.room; s.leisure = tgt.leisure;
       goTo(s, tgt.x, tgt.y);
     }
   }
 
   // ---------------------------------------------------------------- o boneco
+  const hd0 = (hands, dir) => hands[dir > 0 ? 1 : 0];
   function drawPerson(s, sx, sy, t, pose) {
     const a = s.data;
     const dir = s.dir;
     const jumpY = s.jump > 0 ? Math.sin((1 - s.jump / 0.9) * Math.PI) * 14 : 0;
-    const sit = pose === 'sit';
+    const sit = SITTING.has(pose);
     const hipY = sy - (sit ? 6 : 9) - jumpY;
     const top = hipY - 14;
     const headY = top - 6;
@@ -436,6 +553,17 @@
       if (pose === 'wave' && side === dir) return [sx + side * 9, top - 9 + Math.sin(t * 10) * 3];
       if (pose === 'play' && side === dir) return [sx + side * 9, top + 4 + (reduced ? 0 : Math.sin(t * 4.4 + (dir > 0 ? 0 : Math.PI)) * 4)];
       if (pose === 'coffee' && side === dir) return [sx + side * 6, top + 5];
+      if (pose === 'chess') { const turn = !reduced && ((t + (s.k || 0) * 3) % 6) < 0.8; return side === dir && turn ? [sx + dir * 10, top + 10] : [sx + side * 4, top + 9]; }
+      if (pose === 'cards') return [sx + side * 3, top + 7];
+      if (pose === 'phone') return [sx + side * 2, top + 6 + (reduced ? 0 : Math.sin(t * 9 + side) * 0.5)];
+      if (pose === 'magazine') return [sx + side * 5, top + 6];
+      if (pose === 'videogame') return [sx + side * 2.5, top + 8 + (reduced ? 0 : Math.sin(t * 18 + side * 2) * 1)];
+      if (pose === 'darts' && side === dir) {
+        const c = reduced ? 2 : (t + (s.k || 0)) % 2.6;
+        if (c < 0.35) return [sx + dir * 1, top - 6];
+        if (c < 0.6) return [sx + dir * 11, top - 3];
+        return [sx + dir * 7, shoulderY + 6];
+      }
       if (pose === 'sit' || pose === 'type') { const tap = reduced ? 0 : Math.sin(t * 22 + side * 1.7) * 1.3; return [sx + side * 4, top + 8 + tap]; }
       return [sx + side * 7 - swing * side * 3, shoulderY + 9];
     };
@@ -446,7 +574,7 @@
     }
     // objetos nas mãos
     const mid = [(hands[0][0] + hands[1][0]) / 2, (hands[0][1] + hands[1][1]) / 2];
-    if (!sit && (pose === 'type' || s.acc === 'tablet' || s.acc === 'caderno' || s.acc === 'prancheta') && pose !== 'wave' && !s.away) {
+    if (!sit && !LEISURE.has(pose) && (pose === 'type' || s.acc === 'tablet' || s.acc === 'caderno' || s.acc === 'prancheta') && pose !== 'wave' && !s.away) {
       const col = s.acc === 'caderno' ? '#f6f8fa' : s.acc === 'prancheta' ? '#b08a5a' : '#161b22';
       ctx.fillStyle = col; roundRect(mid[0] - 5, mid[1] - 3, 10, 7, 1.5); ctx.fill();
       if (s.acc === 'tablet') { ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(mid[0] - 3, mid[1] + 2); ctx.lineTo(mid[0], mid[1]); ctx.lineTo(mid[0] + 3, mid[1] - 1); ctx.stroke(); }
@@ -455,6 +583,11 @@
     for (const h of hands) { ctx.fillStyle = s.skin; ctx.beginPath(); ctx.arc(h[0], h[1], 1.8, 0, 7); ctx.fill(); }
     const hd = hands[dir > 0 ? 1 : 0];
     if (pose === 'play') { ctx.fillStyle = '#d1242f'; ctx.beginPath(); ctx.ellipse(hd[0] + dir * 3, hd[1] - 2, 3.2, 4, 0, 0, 7); ctx.fill(); }
+    if (pose === 'cards' && !s.away) { for (let k = -1; k <= 1; k++) { ctx.save(); ctx.translate(mid[0], mid[1] - 2); ctx.rotate(k * 0.35); ctx.fillStyle = k ? '#f6f8fa' : '#ffdcd7'; ctx.fillRect(-2, -6, 4, 6); ctx.restore(); } }
+    if (pose === 'phone' && !s.away) { ctx.fillStyle = '#161b22'; roundRect(mid[0] - 2.5, mid[1] - 4.5, 5, 7, 1); ctx.fill(); ctx.fillStyle = '#58a6ff'; ctx.fillRect(mid[0] - 1.7, mid[1] - 3.7, 3.4, 5.2); }
+    if (pose === 'magazine' && !s.away) { ctx.fillStyle = '#f778ba'; ctx.fillRect(mid[0] - 6, mid[1] - 5, 6, 8); ctx.fillStyle = '#f6f8fa'; ctx.fillRect(mid[0], mid[1] - 5, 6, 8); ctx.fillStyle = '#8b949e'; ctx.fillRect(mid[0] + 1, mid[1] - 3, 4, 0.8); ctx.fillRect(mid[0] + 1, mid[1] - 1, 4, 0.8); }
+    if (pose === 'videogame') { ctx.fillStyle = '#21262d'; roundRect(mid[0] - 4, mid[1] - 2, 8, 4, 2); ctx.fill(); }
+    if (pose === 'darts') { const c = reduced ? 2 : (t + (s.k || 0)) % 2.6; if (c >= 0.6 && c < 1.0) { const k2 = (c - 0.6) / 0.4; ctx.strokeStyle = '#e3b341'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(hd0(hands, dir)[0] + dir * (2 + k2 * 18), hd0(hands, dir)[1] - k2 * 10); ctx.lineTo(hd0(hands, dir)[0] + dir * (6 + k2 * 18), hd0(hands, dir)[1] - 2 - k2 * 10); ctx.stroke(); } }
     if (pose === 'coffee') {
       ctx.fillStyle = '#f6f8fa'; roundRect(hd[0] - 2.5, hd[1] - 5, 5, 6, 1); ctx.fill();
       if (!reduced) { ctx.strokeStyle = 'rgba(230,237,243,.55)'; ctx.lineWidth = 1; for (let k = 0; k < 2; k++) { const o = Math.sin(t * 3 + k * 2) * 1.5; ctx.beginPath(); ctx.moveTo(hd[0] - 1 + k * 2, hd[1] - 6); ctx.quadraticCurveTo(hd[0] + o, hd[1] - 9, hd[0] - 1 + k * 2, hd[1] - 12); ctx.stroke(); } }
@@ -526,28 +659,30 @@
     const [sx, sy0] = iso(s.x, s.y);
     const moving = s.path && s.path.length > 0;
     const busy = a.status === 'trabalhando' || a.status === 'delegando';
-    const atDesk = !moving && s.k === 0 && busy && a.room !== 'Entrada' && a.room !== 'Sua mesa / Aprovações';
+    const atDesk = !moving && s.k < WORKSTATIONS.length && busy && !s.leisure && a.room !== 'Entrada' && a.room !== 'Sua mesa / Aprovações' && a.room !== 'Sala de Jogos';
     let pose = 'idle';
     if (moving) pose = 'walk';
     else if (a.status === 'aguardando') pose = 'wave';
     else if (atDesk) pose = 'sit';
     else if (busy) pose = 'type';
-    else if (s.game) pose = s.k < 2 ? 'play' : 'coffee';
-    if (pose === 'play') s.dir = s.k === 0 ? 1 : -1;
+    else if (s.leisure && (a.status === 'ocioso' || a.room === 'Entrada')) pose = s.leisure.pose;
     s.away = moving ? s.awayWalk : atDesk;
+    if (!moving && LEISURE.has(pose)) { s.dir = s.leisure.dir; s.away = !!s.leisure.away; }
     const bob = pose === 'idle' && !reduced ? Math.sin(t * 2 + hash(a.id)) * 0.6 : 0;
     const sy = sy0 + bob;
 
     ctx.globalAlpha = s.alpha;
     const headY = drawPerson(s, sx, sy, t, pose);
     const by = headY - 18;
-    if (!drawSay(s, sx, by, t) && pose !== 'play' && pose !== 'coffee') drawStatusIcon(s, sx, by, t);
+    if (!drawSay(s, sx, by, t) && !LEISURE.has(pose)) drawStatusIcon(s, sx, by, t);
 
     // nome
     const role = s.game && !moving ? 'Na pausa' : a.role;
     const label = role ? (role.length > 18 ? role.slice(0, 17) + '…' : role) : a.name;
-    const ly = sy0 + 15 + ((s.k || 0) % 2) * 12;
-    ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff';
+    const leisure = !moving && LEISURE.has(pose);
+    if (leisure) { ctx.globalAlpha = 1; return; }   // descansando: sem nome (aparece na lista e no cartão da sala)
+    const ly = sy0 + 15 + ((s.k || 0) % 3) * 12;
+    ctx.font = leisure ? '600 9px system-ui' : '600 11px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff';
     ctx.strokeText(label, sx, ly); ctx.fillText(label, sx, ly);
     ctx.globalAlpha = 1;
   }
@@ -616,12 +751,12 @@
     }
 
     // luz das salas
-    const busyRooms = new Set(), litRooms = new Set();
+    const busyRooms = new Set(), litRooms = new Set(), busySeats = new Map();
     for (const a of agentList) {
       const s = sprites.get(a.id);
       if (a.status !== 'ocioso') busyRooms.add(roomIdx(a.room));
       if (s && s.game) busyRooms.add(roomIdx('Sala de Jogos'));
-      if (a.status === 'trabalhando' || a.status === 'delegando') litRooms.add(roomIdx(a.room));
+      if (a.status === 'trabalhando' || a.status === 'delegando') { const r = roomIdx(a.room); litRooms.add(r); busySeats.set(r, (busySeats.get(r) || 0) + 1); }
     }
     for (let i = 0; i < ROOMS.length; i++) {
       const target = busyRooms.has(i) ? 1.08 : 0.78;
@@ -637,10 +772,9 @@
     drawFloor();
     const waiting = agentList.some((a) => a.status === 'aguardando');
     const hotIdx = waiting ? roomIdx('Sua mesa / Aprovações') : -1;
-    for (let i = 0; i < ROOMS.length; i++) drawRoom(i, t, { hot: i === hotIdx, lit: litRooms.has(i), waiting: waiting && i === hotIdx });
+    for (let i = 0; i < ROOMS.length; i++) drawRoom(i, t, { hot: i === hotIdx, lit: litRooms.has(i), busySeats: busySeats.get(i) || 0, waiting: waiting && i === hotIdx });
     if (night > 0.02) { ctx.fillStyle = `rgba(6,12,40,${0.32 * night})`; ctx.fillRect(-2000, -2000, W + 4000, H + 4000); }
     for (let i = 0; i < ROOMS.length; i++) drawGlow(i, night);
-    for (let i = 0; i < ROOMS.length; i++) drawLabel(i, i === hotIdx);
     drawLinks(t);
     [...sprites.values()].sort((a, b) => a.x + a.y - (b.x + b.y)).forEach((s) => drawAgent(s, t));
     drawParticles(dt);
@@ -711,7 +845,7 @@
   function closeCard() { card.hidden = true; }
   async function openCard(room) {
     card.replaceChildren();
-    const head = el('div', 'rc-head'); head.append(el('b', null, room));
+    const head = el('div', 'rc-head'); head.append(el('b', null, dispName(room)));
     const x = el('button', 'rc-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Fechar'); x.addEventListener('click', closeCard); head.append(x);
     card.append(head);
     const now = agentList.filter((a) => effRoom(a, sprites.get(a.id)) === room);
@@ -756,7 +890,7 @@
       const row = el('div', 'ag' + (a.status === 'aguardando' ? ' wait' : ''));
       const dot = el('div', 'dot'); dot.style.background = (sprites.get(a.id) || {}).shirt || c;
       const title = el('div'); title.append(el('b', null, a.role || a.name), el('span', 'room', ' ' + (a.tag || '')));
-      const nm = el('div', 'nm'); nm.append(title, el('div', 'act', a.action || ''), el('div', 'room', a.room + (a.kind === 'sub' ? ' · subagente' : '')));
+      const nm = el('div', 'nm'); nm.append(title, el('div', 'act', a.action || ''), el('div', 'room', dispName(effRoom(a, sprites.get(a.id))) + (a.kind === 'sub' ? ' · subagente' : '')));
       const chip = el('div', 'chip', label); chip.style.background = c + '22'; chip.style.color = c;
       row.append(dot, nm, chip); elAgents.append(row);
     }
