@@ -157,6 +157,56 @@
       ctx.fillStyle = `rgb(${top.map((v) => v | 0).join(',')})`; ctx.beginPath(); ctx.arc(x + 4, y - 3, 9, 0, 7); ctx.fill();
     }
   }
+  // ================================================================ quadro de uso (tokens e limites), perto do sol
+  let USAGE = null;
+  const BOARD = { x: 728, y: 74, w: 222, h: 150 };
+  const fmtTok = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' bi' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' mi' : n >= 1e3 ? (n / 1e3).toFixed(1) + ' mil' : String(Math.round(n))).replace('.', ',');
+  function fmtReset(sec) {
+    if (!sec) return '';
+    const d = new Date(sec * 1000);
+    const now = new Date();
+    const sameDay = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit' });
+    const hm = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(d);
+    if (sameDay.format(d) === sameDay.format(now)) return 'renova às ' + hm;
+    const wd = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' }).format(d).replace('.', '');
+    return 'renova ' + wd + ' ' + hm;
+  }
+  const barColor = (p) => (p >= 85 ? '#ff7b72' : p >= 60 ? '#e3b341' : '#3fb950');
+  function drawUsageBoard() {
+    const { x, y, w, h } = BOARD;
+    // hastes penduradas
+    ctx.strokeStyle = 'rgba(201,209,217,.35)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x + 30, y - 40); ctx.lineTo(x + 30, y); ctx.moveTo(x + w - 30, y - 40); ctx.lineTo(x + w - 30, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(13,17,23,.92)'; roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = '#8a6d4f'; ctx.lineWidth = 3; roundRect(x, y, w, h, 10); ctx.stroke();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e6edf3'; ctx.font = '700 12px system-ui'; ctx.fillText('Uso do Claude', x + 12, y + 19);
+    const u = USAGE;
+    ctx.font = '500 9px system-ui'; ctx.fillStyle = '#8b949e'; ctx.textAlign = 'right';
+    if (u && u.updated) { const m = Math.max(0, Math.round((Date.now() - u.updated) / 60000)); ctx.fillText(m < 1 ? 'agora' : 'há ' + m + ' min', x + w - 12, y + 19); }
+    ctx.textAlign = 'left';
+    if (!u || !u.updated) {
+      ctx.fillStyle = '#8b949e'; ctx.font = '500 10px system-ui';
+      ['Aguardando dados da barra de status', 'do Claude Code. Reinstale com o', 'instalar.bat para ligar o quadro.'].forEach((l, k) => ctx.fillText(l, x + 12, y + 44 + k * 14));
+      return;
+    }
+    ctx.font = '600 10.5px system-ui'; ctx.fillStyle = '#c9d1d9';
+    ctx.fillText('Tokens hoje', x + 12, y + 40); ctx.fillText('Tokens na semana', x + 116, y + 40);
+    ctx.font = '700 13px system-ui'; ctx.fillStyle = '#e6edf3';
+    ctx.fillText(fmtTok(u.today.input + u.today.output), x + 12, y + 56); ctx.fillText(fmtTok(u.week.input + u.week.output), x + 116, y + 56);
+    const rows = [['Limite de 5 horas', u.five_hour], ['Limite semanal', u.seven_day]];
+    rows.forEach(([label, l], k) => {
+      const yy = y + 76 + k * 36;
+      ctx.font = '600 10px system-ui'; ctx.fillStyle = '#c9d1d9'; ctx.fillText(label, x + 12, yy);
+      ctx.textAlign = 'right'; ctx.font = '700 10px system-ui';
+      ctx.fillStyle = l ? barColor(l.used_percentage) : '#8b949e'; ctx.fillText(l ? Math.round(l.used_percentage) + '%' : '—', x + w - 12, yy); ctx.textAlign = 'left';
+      ctx.fillStyle = '#21262d'; roundRect(x + 12, yy + 5, w - 24, 7, 3.5); ctx.fill();
+      if (l) { ctx.fillStyle = barColor(l.used_percentage); roundRect(x + 12, yy + 5, Math.max(7, (w - 24) * Math.min(100, l.used_percentage) / 100), 7, 3.5); ctx.fill(); }
+      ctx.font = '500 9px system-ui'; ctx.fillStyle = '#8b949e';
+      ctx.fillText(l ? fmtReset(l.resets_at) : 'aparece após a 1ª resposta (Pro/Max)', x + 12, yy + 23);
+    });
+  }
+
   function drawFloor() {
     const x0 = -0.6, y0 = -0.6, x1 = 24.9, y1 = 14.9;
     poly([iso(x0, y0), iso(x1, y0), iso(x1, y1), iso(x0, y1)], '#151b23', '#202833');
@@ -778,6 +828,7 @@
     drawLinks(t);
     [...sprites.values()].sort((a, b) => a.x + a.y - (b.x + b.y)).forEach((s) => drawAgent(s, t));
     drawParticles(dt);
+    drawUsageBoard();
     // relógio local UTC-4 (fixo na tela)
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const dpr = window.devicePixelRatio || 1;
@@ -835,6 +886,7 @@
   function tapAt([px, py]) {
     const k = scale * view.z;
     const lx = (px - offX - view.x) / k, ly = (py - offY - view.y) / k;
+    if (lx >= BOARD.x && lx <= BOARD.x + BOARD.w && ly >= BOARD.y && ly <= BOARD.y + BOARD.h) { openUsageCard(); return; }
     const a = (lx - OX) / (TW / 2), b = (ly - OY) / (TH / 2);
     const i = roomAtPoint((a + b) / 2, (b - a) / 2);
     if (i < 0) { closeCard(); return; }
@@ -843,6 +895,26 @@
 
   const card = document.getElementById('roomcard');
   function closeCard() { card.hidden = true; }
+  function openUsageCard() {
+    card.replaceChildren();
+    const head = el('div', 'rc-head'); head.append(el('b', null, 'Uso do Claude'));
+    const x = el('button', 'rc-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Fechar'); x.addEventListener('click', closeCard); head.append(x);
+    card.append(head);
+    const u = USAGE;
+    if (!u || !u.updated) { card.append(el('div', 'rc-empty', 'Sem dados ainda. O quadro usa a barra de status do Claude Code: rode o instalar.bat de novo no PC.')); card.hidden = false; return; }
+    const usd = (v) => 'US$ ' + (v || 0).toFixed(2).replace('.', ',');
+    card.append(el('div', 'rc-sub', 'Hoje (UTC-4)'));
+    card.append(el('div', 'rc-row', `${fmtTok(u.today.input + u.today.output)} tokens — entrada ${fmtTok(u.today.input)}, saída ${fmtTok(u.today.output)}`));
+    card.append(el('div', 'rc-row', `${u.sessions_today} sessão(ões) · custo estimado ${usd(u.today.cost)} (preço de API; no plano não é cobrado)`));
+    card.append(el('div', 'rc-sub', 'Semana (desde segunda)'));
+    card.append(el('div', 'rc-row', `${fmtTok(u.week.input + u.week.output)} tokens — entrada ${fmtTok(u.week.input)}, saída ${fmtTok(u.week.output)}`));
+    card.append(el('div', 'rc-sub', 'Limites do plano'));
+    for (const [label, l] of [['5 horas', u.five_hour], ['Semanal', u.seven_day]]) {
+      card.append(el('div', 'rc-row', l ? `${label}: ${Math.round(l.used_percentage)}% usado · ${fmtReset(l.resets_at)}` : `${label}: sem dado ainda`));
+    }
+    card.append(el('div', 'rc-empty', 'A Anthropic não tem limite diário: os limites são a janela de 5 horas e a semanal.'));
+    card.hidden = false;
+  }
   async function openCard(room) {
     card.replaceChildren();
     const head = el('div', 'rc-head'); head.append(el('b', null, dispName(room)));
@@ -926,10 +998,12 @@
       if (Array.isArray(s.rooms) && s.rooms.length) ROOMS = s.rooms;
       document.getElementById('foot').textContent = 'Modo de detalhe: ' + (s.detail === 'normal' ? 'normal (mostra detalhes curtos)' : 'mínimo (só ferramenta e tipo de evento)');
       elLog.replaceChildren(); s.log.forEach(addLog);
+      USAGE = s.usage || null;
       setAgents(s.agents);
     });
     es.addEventListener('agents', (m) => setAgents(JSON.parse(m.data)));
     es.addEventListener('log', (m) => addLog(JSON.parse(m.data)));
+    es.addEventListener('usage', (m) => { USAGE = JSON.parse(m.data); });
   }
 
   document.getElementById('demo').addEventListener('click', () => {

@@ -23,6 +23,14 @@ Node.js puro, **sem dependências**. Funciona de dois jeitos:
 
 Cada agente aparece com a **função** da sala onde está trabalhando (Desenvolvedor, Copywriter, Gestor de Tráfego, Vendedor…) e uma frase do que está fazendo (editando arquivo, rodando comando, pesquisando na web, usando canva…). Subagentes usam o tipo informado pelo Claude Code (Explorador, Planejador, Assistente geral). O código curto (`#6abf`) diferencia sessões. As funções ficam nos mapas `ROLE` e `SUBROLE` do `server.js`.
 
+## Quadro de uso (tokens e limites)
+
+No céu, perto do sol, um quadro mostra **tokens de hoje e da semana** (UTC-4, semana a partir de segunda) e os **limites do plano**: a janela de **5 horas** e a **semanal**, com a porcentagem usada e quando renovam. Toque no quadro para ver os detalhes.
+
+Esses dados vêm da **barra de status** do Claude Code (`statusline.js`), o único lugar onde o Claude Code entrega uso e limites. O `install.js` instala a barra de status; se você já tinha uma, ela continua aparecendo (fica guardada em `statusline_original` no `~/.agentes-office.json` e volta no `--uninstall`). Só números são enviados (`POST /usage`, mesmo token do hook), no máximo a cada 20 s. Para não instalar: `node install.js --sem-statusline`.
+
+Observações: a Anthropic não tem limite diário (só 5 horas e semanal); os limites só aparecem em planos Pro/Max e depois da primeira resposta da sessão; os totais ficam na memória do servidor e zeram quando ele reinicia.
+
 ## Segurança
 
 - **Senha do painel** (`PANEL_PASSWORD`): sem ela não se vê nada (`/`, `/events`, `/state`, `/demo`). Login com cookie assinado `HttpOnly`, `Secure` (em HTTPS) e `SameSite=Strict`, válido por 30 dias. Trocar a senha derruba todas as sessões.

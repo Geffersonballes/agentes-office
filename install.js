@@ -8,7 +8,8 @@
  *                                   (o token é perguntado sem aparecer na tela, ou lido de AGENTES_OFFICE_TOKEN)
  *   node install.js --testar        envia um evento de teste para o servidor configurado
  *   node install.js --diagnostico   confere configuração, hooks instalados e roda o hook.js de verdade
- *   node install.js --uninstall     remove só os hooks deste projeto (mantém ~/.agentes-office.json)
+ *   node install.js --uninstall     remove só os hooks deste projeto e devolve a barra de status original
+ *   node install.js --sem-statusline   instala sem a barra de status (sem o quadro de tokens e limites)
  *   node install.js --uninstall --purge   remove também ~/.agentes-office.json
  *
  * Sempre faz backup de ~/.claude/settings.json e de ~/.agentes-office.json antes de alterar.
@@ -25,6 +26,9 @@ const SETTINGS = process.env.CLAUDE_SETTINGS_FILE || path.join(HOME, '.claude', 
 const CONFIG = process.env.AGENTES_OFFICE_CONFIG || path.join(HOME, '.agentes-office.json');
 const HOOK = path.join(__dirname, 'hook.js');
 const COMMAND = `node "${HOOK}"`;
+const STATUSLINE = path.join(__dirname, 'statusline.js');
+const STATUS_COMMAND = `node "${STATUSLINE}"`;
+const OURS_STATUS = /agentes-office.*statusline\.js|statusline\.js.*agentes-office/i;
 const OURS = /agentes-office.*hook\.js|hook\.js.*agentes-office/i;
 
 const TOOL_EVENTS = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure'];
@@ -74,7 +78,14 @@ function stripOurs(hooks) {
   return out;
 }
 
-function applySettings(install) {
+// A barra de status do usuário (se houver) é guardada na configuração e continua sendo exibida pelo statusline.js.
+function currentStatusOriginal() {
+  const st = readJson(SETTINGS, {});
+  const sl = st && st.statusLine;
+  if (sl && sl.type === 'command' && typeof sl.command === 'string' && !OURS_STATUS.test(sl.command)) return sl.command;
+  return null;
+}
+function applySettings(install, opts = {}) {
   const settings = readJson(SETTINGS, {});
   if (typeof settings !== 'object' || Array.isArray(settings)) { console.error('settings.json inesperado. Nada foi alterado.'); process.exit(1); }
   const before = JSON.stringify(settings);
@@ -85,6 +96,15 @@ function applySettings(install) {
     for (const ev of OTHER_EVENTS) (hooks[ev] = hooks[ev] || []).push({ hooks: [entry] });
   }
   if (Object.keys(hooks).length) settings.hooks = hooks; else delete settings.hooks;
+  const ourStatus = settings.statusLine && typeof settings.statusLine.command === 'string' && OURS_STATUS.test(settings.statusLine.command);
+  if (install && opts.statusline) {
+    const padding = settings.statusLine && settings.statusLine.padding;
+    settings.statusLine = Object.assign({ type: 'command', command: STATUS_COMMAND }, padding !== undefined ? { padding } : {});
+  } else if (ourStatus) {
+    // desinstalando (ou instalando sem a barra): devolve a original, se havia
+    if (opts.original) settings.statusLine = Object.assign({}, settings.statusLine, { command: opts.original });
+    else delete settings.statusLine;
+  }
   if (JSON.stringify(settings) === before) return { changed: false };
   const bak = backup(SETTINGS);
   writeJson(SETTINGS, settings);
@@ -150,6 +170,8 @@ function diagnostico() {
   const cmds = new Set();
   for (const groups of Object.values(st.hooks || {})) for (const g of groups || []) for (const h of g.hooks || []) if (typeof h.command === 'string' && OURS.test(h.command)) cmds.add(h.command);
   for (const c of cmds) console.log(`      comando: ${c}`);
+  const sl = st.statusLine && typeof st.statusLine.command === 'string' && OURS_STATUS.test(st.statusLine.command);
+  console.log(`${sl ? 'OK  ' : 'AVISO'} Barra de status do quadro de tokens ${sl ? 'instalada' : 'não instalada (rode node install.js)'}`);
   const where = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { encoding: 'utf8' });
   console.log(`${ok(where.status === 0)} "node" no PATH: ${(where.stdout || '').trim().split(/\r?\n/)[0] || 'NÃO encontrado'}`);
   if (st.disableAllHooks) console.log('ERRO "disableAllHooks": true no settings.json — os hooks estão desligados!');
@@ -178,7 +200,7 @@ async function main() {
   if (args.diagnostico) return diagnostico();
 
   if (args.uninstall) {
-    const r = applySettings(false);
+    const r = applySettings(false, { original: (readJson(CONFIG, {}) || {}).statusline_original });
     console.log(r.changed ? `Hooks do Escritório de Agentes removidos de ${SETTINGS}.\nBackup: ${r.backup}` : 'Nenhum hook do Escritório de Agentes estava instalado.');
     if (args.purge && fs.existsSync(CONFIG)) { const b = backup(CONFIG); fs.unlinkSync(CONFIG); console.log(`Configuração ${CONFIG} removida (backup: ${b}).`); }
     else if (fs.existsSync(CONFIG)) console.log(`A configuração ${CONFIG} foi mantida (use --purge para apagar).`);
@@ -212,15 +234,19 @@ async function main() {
   if (!local && !token) { console.error('Servidor remoto exige token. Nada foi alterado.'); process.exit(1); }
 
   const cfg = Object.assign({}, current, { url, token, detalhe });
+  const withStatus = !args['sem-statusline'];
+  const orig = currentStatusOriginal();
+  if (orig) cfg.statusline_original = orig;   // a sua barra de status atual continua aparecendo
   if (JSON.stringify(cfg) !== JSON.stringify(current)) {
     const b = backup(CONFIG);
     writeJson(CONFIG, cfg, 0o600);
     console.log(`Configuração gravada em ${CONFIG}${b ? ` (backup: ${b})` : ''}.`);
   } else console.log(`Configuração em ${CONFIG} já estava atualizada.`);
 
-  const r = applySettings(true);
+  const r = applySettings(true, { statusline: withStatus, original: cfg.statusline_original });
   console.log(r.changed ? `Hooks instalados em ${SETTINGS}${r.backup ? `\nBackup: ${r.backup}` : ''}` : 'Hooks já estavam instalados (nada mudou).');
   console.log(`\nServidor: ${url}\nDetalhe: ${detalhe}${detalhe === 'minimo' ? ' (só nome da ferramenta e tipo do evento)' : ''}`);
+  console.log(withStatus ? `Barra de status: instalada (envia tokens e limites para o quadro)${cfg.statusline_original ? '; a sua barra antiga continua aparecendo' : ''}.` : 'Barra de status: não instalada (--sem-statusline).');
   console.log('Teste com:  node install.js --testar');
   console.log('Para remover:  node install.js --uninstall');
   console.log('Os hooks valem para as próximas sessões do Claude Code (reinicie as abertas).');

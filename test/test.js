@@ -164,6 +164,21 @@ test('/history exige login e registra passagens pelas salas', async () => {
   assert.ok(!('id' in v));
 });
 
+test('/usage: exige token, soma tokens do dia e guarda limites de 5 h e semanal', async () => {
+  const body = (o) => JSON.stringify(Object.assign({ session_id: 'uso-1' }, o));
+  assert.strictEqual((await req('POST', '/usage', { headers: { 'Content-Type': 'application/json' }, body: body({ input_tokens: 10 }) })).status, 401);
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  assert.strictEqual((await req('POST', '/usage', { headers: auth, body: body({ input_tokens: 1000, output_tokens: 200, cost_usd: 0.5, five_hour: { used_percentage: 23.5, resets_at: future }, seven_day: { used_percentage: 41.2, resets_at: future + 86400 } }) })).status, 200);
+  await req('POST', '/usage', { headers: auth, body: body({ input_tokens: 1500, output_tokens: 300 }) });
+  await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'uso-2', input_tokens: 100, output_tokens: 50 }) });
+  assert.strictEqual((await req('POST', '/usage', { headers: auth, body: body({ input_tokens: 'x', five_hour: { used_percentage: 999 } }) })).status, 200);
+  const cookie = await login();
+  const u = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body).usage;
+  assert.ok(u.today.input >= 1600 && u.today.output >= 350, JSON.stringify(u));
+  assert.strictEqual(u.five_hour.used_percentage, 23.5);
+  assert.strictEqual(u.seven_day.used_percentage, 41.2);
+});
+
 test('/demo exige cabeçalho anti-CSRF', async () => {
   const cookie = await login();
   assert.strictEqual((await req('POST', '/demo', { headers: { Cookie: cookie } })).status, 403);
@@ -256,4 +271,47 @@ test('install: grava config, é idempotente, preserva outros hooks e desinstala 
   s = JSON.parse(fs.readFileSync(settings, 'utf8'));
   assert.deepStrictEqual(s, { model: 'x', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo outro' }] }] } });
   assert.ok(fs.existsSync(cfg));
+});
+
+test('statusline: mostra a barra, envia só números e preserva a barra original', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-'));
+  const cfg = path.join(dir, 'cfg.json');
+  fs.writeFileSync(cfg, JSON.stringify({ url: 'http://127.0.0.1:' + PORT, token: TOKEN }));
+  const input = JSON.stringify({ session_id: 'sl-1', cwd: '/c/segredo', transcript_path: '/c/segredo/t.jsonl',
+    context_window: { total_input_tokens: 4321, total_output_tokens: 765, used_percentage: 12 },
+    cost: { total_cost_usd: 0.42 }, rate_limits: { five_hour: { used_percentage: 33, resets_at: Math.floor(Date.now() / 1000) + 999 } } });
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'statusline.js')], { input, encoding: 'utf8', timeout: 5000,
+    env: Object.assign({}, process.env, { AGENTES_OFFICE_CONFIG: cfg, TMPDIR: dir, TEMP: dir, TMP: dir }) });
+  assert.strictEqual(r.status, 0);
+  assert.match(r.stdout, /5h 33%/);
+  await new Promise((res) => setTimeout(res, 300));
+  const cookie = await login();
+  const u = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body).usage;
+  assert.ok(u.today.input >= 4321);
+  assert.strictEqual(u.five_hour.used_percentage, 33);
+  assert.doesNotMatch(JSON.stringify(u), /segredo/);
+
+  // barra original continua sendo exibida
+  fs.writeFileSync(cfg, JSON.stringify({ url: 'http://127.0.0.1:' + PORT, token: TOKEN, statusline_original: 'echo MINHA-BARRA' }));
+  const r2 = spawnSync(process.execPath, [path.join(ROOT, 'statusline.js')], { input, encoding: 'utf8', timeout: 5000,
+    env: Object.assign({}, process.env, { AGENTES_OFFICE_CONFIG: cfg, TMPDIR: dir, TEMP: dir, TMP: dir }) });
+  assert.match(r2.stdout, /MINHA-BARRA/);
+});
+
+test('install: instala a barra de status guardando a original e devolve ao desinstalar', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-'));
+  const settings = path.join(dir, 'settings.json');
+  const cfg = path.join(dir, 'cfg.json');
+  fs.writeFileSync(settings, JSON.stringify({ statusLine: { type: 'command', command: 'echo antiga', padding: 1 } }));
+  const env = Object.assign({}, process.env, { CLAUDE_SETTINGS_FILE: settings, AGENTES_OFFICE_CONFIG: cfg, AGENTES_OFFICE_TOKEN: TOKEN });
+  const run = (...a) => spawnSync(process.execPath, [path.join(ROOT, 'install.js'), ...a], { env, encoding: 'utf8' });
+  assert.strictEqual(run('--sim', '--url=https://agentes.exemplo.com.br').status, 0);
+  let s = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  assert.match(s.statusLine.command, /statusline\.js/); assert.strictEqual(s.statusLine.padding, 1);
+  assert.strictEqual(JSON.parse(fs.readFileSync(cfg, 'utf8')).statusline_original, 'echo antiga');
+  run('--sim', '--url=https://agentes.exemplo.com.br');                     // de novo: não perde a original
+  assert.strictEqual(JSON.parse(fs.readFileSync(cfg, 'utf8')).statusline_original, 'echo antiga');
+  run('--uninstall');
+  s = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  assert.deepStrictEqual(s.statusLine, { type: 'command', command: 'echo antiga', padding: 1 });
 });

@@ -11,6 +11,7 @@
  *   GET  /history     quem passou por cada sala nas últimas 36 h (exige login)
  *   POST /demo        simulação (exige login + cabeçalho X-Requested-With)
  *   POST /event       recebe eventos do hook (exige Authorization: Bearer <HOOK_TOKEN>)
+ *   POST /usage       recebe tokens e limites da barra de status (mesmo token)
  *   GET  /login       tela de login; POST /login entra; GET /logout sai
  *   GET  /healthz     verificação de saúde (sem login, não revela nada)
  *
@@ -266,8 +267,58 @@ function publicAgent(a) {
   return { id: a.id, name: labelOf(a), role: roleOf(a), tag: a.tag, action: actionOf(a), kind: a.kind,
     parent: a.parent || null, status: a.status, room: a.room, tool: a.tool || null, since: a.since, updated: a.updated };
 }
+// ---------------------------------------------------------------- uso de tokens e limites
+// Vem da barra de status do Claude Code (statusline.js): só números, nunca conteúdo.
+// Dia e semana contados em UTC-4 (semana começa na segunda-feira).
+const TZ_OFFSET_MS = 4 * 3600e3;
+const dayKey = (t) => new Date(t - TZ_OFFSET_MS).toISOString().slice(0, 10);
+const weekKey = (t) => { const d = new Date(t - TZ_OFFSET_MS); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+const usage = { sessions: new Map(), five_hour: null, seven_day: null, updated: 0 };
+const num = (v, max) => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= max ? v : null);
+function sanitizeUsage(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const sid = cleanId(raw.session_id); if (!sid) return null;
+  const lim = (o) => {
+    if (!o || typeof o !== 'object') return null;
+    const pct = num(o.used_percentage, 100), at = num(o.resets_at, 4e9);
+    return pct === null ? null : { used_percentage: pct, resets_at: at };
+  };
+  return { session_id: sid, input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
+    cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day) };
+}
+function applyUsage(u) {
+  const now = Date.now(), day = dayKey(now), week = weekKey(now);
+  let r = usage.sessions.get(u.session_id);
+  if (!r) { r = { input: 0, output: 0, cost: 0, day, week, dIn: 0, dOut: 0, wIn: 0, wOut: 0, dCost: 0, wCost: 0 }; usage.sessions.set(u.session_id, r); }
+  if (r.day !== day) { r.day = day; r.dIn = r.input; r.dOut = r.output; r.dCost = r.cost; }
+  if (r.week !== week) { r.week = week; r.wIn = r.input; r.wOut = r.output; r.wCost = r.cost; }
+  // os totais da sessão só crescem; se diminuírem, a sessão foi reiniciada
+  if (u.input !== null && u.output !== null) {
+    if (u.input < r.input || u.output < r.output) { r.dIn = r.wIn = 0; r.dOut = r.wOut = 0; r.dCost = r.wCost = 0; }
+    r.input = u.input; r.output = u.output;
+  }
+  if (u.cost !== null) r.cost = u.cost;
+  r.t = now;
+  if (u.five_hour) usage.five_hour = Object.assign({ t: now }, u.five_hour);
+  if (u.seven_day) usage.seven_day = Object.assign({ t: now }, u.seven_day);
+  usage.updated = now;
+  for (const [id, x] of usage.sessions) if (now - x.t > 9 * 864e5) usage.sessions.delete(id);
+}
+function usageSummary() {
+  const now = Date.now(), day = dayKey(now), week = weekKey(now);
+  const out = { today: { input: 0, output: 0, cost: 0 }, week: { input: 0, output: 0, cost: 0 }, sessions_today: 0 };
+  for (const r of usage.sessions.values()) {
+    if (r.day === day) { out.today.input += r.input - r.dIn; out.today.output += r.output - r.dOut; out.today.cost += (r.cost || 0) - (r.dCost || 0); out.sessions_today++; }
+    if (r.week === week) { out.week.input += r.input - r.wIn; out.week.output += r.output - r.wOut; out.week.cost += (r.cost || 0) - (r.wCost || 0); }
+  }
+  const live = (l) => (l && (!l.resets_at || l.resets_at * 1000 > now) ? { used_percentage: l.used_percentage, resets_at: l.resets_at } : null);
+  out.five_hour = live(usage.five_hour); out.seven_day = live(usage.seven_day);
+  out.updated = usage.updated || null;
+  return out;
+}
+
 function snapshot() {
-  return { rooms: ROOMS, detail: PANEL_DETAIL, agents: [...agents.values()].map(publicAgent), log: log.slice(-60) };
+  return { rooms: ROOMS, detail: PANEL_DETAIL, agents: [...agents.values()].map(publicAgent), log: log.slice(-60), usage: usageSummary() };
 }
 
 function ensureMain(sid) {
@@ -494,6 +545,23 @@ const server = http.createServer(async (req, res) => {
     if (p === '/healthz') return send(req, res, 200, 'ok');
 
     // ---- hook
+    if (p === '/usage') {
+      if (req.method !== 'POST') return send(req, res, 405, 'método não permitido', null, { Allow: 'POST' });
+      if (!limitEvent(ip)) return send(req, res, 429, 'muitas requisições', null, { 'Retry-After': '60' });
+      if (AUTH_HOOK) {
+        const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+        if (!m || !safeEqual(m[1].trim(), HOOK_TOKEN)) { req.resume(); return send(req, res, 401, 'não autorizado', null, { 'WWW-Authenticate': 'Bearer' }); }
+      }
+      let body;
+      try { body = await readBody(req, 4096); } catch (e) { return send(req, res, 413, 'corpo grande demais', null, { Connection: 'close' }); }
+      let raw; try { raw = JSON.parse(body); } catch { return send(req, res, 400, 'json inválido'); }
+      const u = sanitizeUsage(raw);
+      if (!u) return send(req, res, 400, 'uso inválido');
+      applyUsage(u);
+      broadcast('usage', usageSummary());
+      return json(req, res, 200, { ok: true });
+    }
+
     if (p === '/event') {
       if (req.method !== 'POST') return send(req, res, 405, 'método não permitido', null, { Allow: 'POST' });
       if (!limitEvent(ip)) return send(req, res, 429, 'muitas requisições', null, { 'Retry-After': '60' });
