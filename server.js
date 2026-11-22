@@ -8,6 +8,7 @@
  *   GET  /app.js      script do painel (exige login)
  *   GET  /events      SSE em tempo real (exige login)
  *   GET  /state       estado atual em JSON (exige login)
+ *   GET  /history     quem passou por cada sala nas últimas 36 h (exige login)
  *   POST /demo        simulação (exige login + cabeçalho X-Requested-With)
  *   POST /event       recebe eventos do hook (exige Authorization: Bearer <HOOK_TOKEN>)
  *   GET  /login       tela de login; POST /login entra; GET /logout sai
@@ -279,9 +280,20 @@ function ensureMain(sid) {
   }
   return a;
 }
+// Histórico de passagens pelas salas (últimas 36 h, só função + código curto + horário).
+const visits = [];
+function recordVisit(a) {
+  if (!a.room || a.room === 'Entrada') return;
+  const last = visits.length && visits[visits.length - 1];
+  if (last && last.id === a.id && last.room === a.room) return;
+  visits.push({ id: a.id, room: a.room, role: roleOf(a), tag: a.tag, kind: a.kind, t: Date.now() });
+  const cut = Date.now() - 36 * 3600e3;
+  while (visits.length && (visits[0].t < cut || visits.length > 2000)) visits.shift();
+}
 function setStatus(a, status, room) {
   if (a.status !== status) { a.status = status; a.since = Date.now(); }
-  if (room) a.room = room;
+  if (room && room !== a.room) { a.room = room; recordVisit(a); }
+  else if (room) a.room = room;
   a.updated = Date.now();
 }
 function pushLog(entry) {
@@ -529,6 +541,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/' && req.method === 'GET') return send(req, res, 200, INDEX, 'text/html; charset=utf-8');
     if (p === '/app.js' && req.method === 'GET') return send(req, res, 200, APPJS, 'text/javascript; charset=utf-8');
     if (p === '/state' && req.method === 'GET') return json(req, res, 200, snapshot());
+    if (p === '/history' && req.method === 'GET') {
+      const since = Math.max(Number(url.searchParams.get('since')) || 0, Date.now() - 36 * 3600e3);
+      return json(req, res, 200, visits.filter((v) => v.t >= since).map(({ room, role, tag, kind, t }) => ({ room, role, tag, kind, t })));
+    }
 
     if (p === '/events' && req.method === 'GET') {
       if (clients.size >= MAX_SSE_CLIENTS) return send(req, res, 503, 'muitas conexões');

@@ -154,6 +154,16 @@ test('agentes ganham nome pela função e frase do que estão fazendo', async ()
   assert.strictEqual(a.role, 'Aguardando você'); assert.strictEqual(a.action, 'esperando sua aprovação');
 });
 
+test('/history exige login e registra passagens pelas salas', async () => {
+  assert.strictEqual((await req('GET', '/history')).status, 401);
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: 'hist-1234', event: 'PreToolUse', tool_name: 'Edit' }) });
+  const cookie = await login();
+  const h = JSON.parse((await req('GET', '/history', { headers: { Cookie: cookie } })).body);
+  const v = h.find((x) => x.tag === '#hist');
+  assert.ok(v); assert.strictEqual(v.room, 'Tecnologia'); assert.strictEqual(v.role, 'Desenvolvedor');
+  assert.ok(!('id' in v));
+});
+
 test('/demo exige cabeçalho anti-CSRF', async () => {
   const cookie = await login();
   assert.strictEqual((await req('POST', '/demo', { headers: { Cookie: cookie } })).status, 403);

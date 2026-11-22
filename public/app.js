@@ -80,13 +80,8 @@
     poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy + S), iso(gx, gy + S)], floor, '#3a4250');
     poly([iso(gx, gy), iso(gx + S, gy), iso(gx + S, gy, WALL), iso(gx, gy, WALL)], shade(tint, 1.25 * L));
     poly([iso(gx, gy), iso(gx, gy + S), iso(gx, gy + S, WALL), iso(gx, gy, WALL)], shade(tint, 1.05 * L));
-    // luminária no teto (acende)
-    if (L > 0.9) {
-      const c = iso(gx + S / 2, gy + S / 2, 0);
-      const g = ctx.createRadialGradient(c[0], c[1], 2, c[0], c[1], 70);
-      g.addColorStop(0, `rgba(255,236,180,${0.18 * (L - 0.78) / 0.3})`); g.addColorStop(1, 'rgba(255,236,180,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(c[0], c[1], 78, 40, 0, 0, 7); ctx.fill();
-    }
+    // porta (no lado direito da sala, para o corredor)
+    poly([iso(gx + S - 0.05, gy + 1.35), iso(gx + S + 0.35, gy + 1.35), iso(gx + S + 0.35, gy + 2.15), iso(gx + S - 0.05, gy + 2.15)], shade('#6e4b2a', Math.max(L, 0.85)));
     themed(i, name, gx, gy, t, st, L);
     if (name !== 'Entrada') {
       box(gx + 1.3, gy + 0.8, 1.1, 0.6, 9, '#8a6d4f', 0, L);                 // mesa
@@ -94,6 +89,71 @@
       screen(gx + 1.55, gy + 0.97, 0.6, 10, 15, st.lit, t, i);
       box(gx + 1.62, gy + 1.75, 0.45, 0.4, 5, '#3d444d', 0, L);              // cadeira
     }
+  }
+
+  // luminária acesa (desenhada depois da sombra da noite, para brilhar)
+  function drawGlow(i, night) {
+    const L = light[i];
+    if (L <= 0.9) return;
+    const { gx, gy } = roomOrigin(i);
+    const c = iso(gx + S / 2, gy + S / 2, 0);
+    const a = (0.16 + 0.22 * night) * Math.min(1, (L - 0.78) / 0.3);
+    const g = ctx.createRadialGradient(c[0], c[1], 2, c[0], c[1], 80);
+    g.addColorStop(0, `rgba(255,232,170,${a})`); g.addColorStop(1, 'rgba(255,232,170,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(c[0], c[1], 82, 42, 0, 0, 7); ctx.fill();
+  }
+
+  // ================================================================ céu, chão e corredores
+  const TZ = 'America/Sao_Paulo';
+  function brasilia() {
+    if (QS.has('hora')) { const h = Math.min(23.99, Math.max(0, Number(QS.get('hora')) || 0)); return { h, txt: String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.round((h % 1) * 60)).padStart(2, '0') + ' (prévia)' }; }
+    try {
+      const parts = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+      const h = Number(parts.find((x) => x.type === 'hour').value) % 24, m = Number(parts.find((x) => x.type === 'minute').value);
+      return { h: h + m / 60, txt: String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') };
+    } catch { const d = new Date(); return { h: d.getHours() + d.getMinutes() / 60, txt: d.toTimeString().slice(0, 5) }; }
+  }
+  const smooth = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+  function sky() {
+    const { h, txt } = brasilia();
+    const day = smooth(5.5, 7.5, h) * (1 - smooth(17.5, 19.5, h));   // 0 = noite, 1 = dia
+    const dusk = Math.max(0, 1 - Math.abs(h - 18.3) / 1.4) + Math.max(0, 1 - Math.abs(h - 6.2) / 1.2) * 0.7;
+    const label = day > 0.85 ? 'dia' : day < 0.15 ? 'noite' : h < 12 ? 'amanhecer' : 'entardecer';
+    return { h, txt, day, dusk: Math.min(1, dusk), label };
+  }
+  const STARS = Array.from({ length: 70 }, (_, k) => [(k * 137.5) % W, ((k * 71.3) % 1) * 0 + ((k * 53) % 260), 0.6 + ((k * 7) % 10) / 12]);
+  function drawSky(t, sk) {
+    const top = [lerp(5, 30, sk.day) + 40 * sk.dusk, lerp(7, 44, sk.day) + 14 * sk.dusk, lerp(14, 62, sk.day)];
+    const bot = [lerp(10, 22, sk.day) + 30 * sk.dusk, lerp(13, 28, sk.day) + 8 * sk.dusk, lerp(20, 36, sk.day)];
+    const g = ctx.createLinearGradient(0, -200, 0, H + 200);
+    g.addColorStop(0, `rgb(${top.map((v) => v | 0).join(',')})`); g.addColorStop(1, `rgb(${bot.map((v) => v | 0).join(',')})`);
+    ctx.fillStyle = g; ctx.fillRect(-2000, -2000, W + 4000, H + 4000);
+    if (sk.day < 0.4) {
+      for (const [x, y, r] of STARS) {
+        const tw = reduced ? 1 : 0.55 + 0.45 * Math.sin(t * 1.7 + x);
+        ctx.fillStyle = `rgba(255,255,255,${(0.4 - sk.day) * 2 * tw})`; ctx.beginPath(); ctx.arc(x, y - 40, r, 0, 7); ctx.fill();
+      }
+    }
+    // sol ou lua num arco no alto
+    const isSun = sk.h >= 6 && sk.h < 18.5;
+    const u = isSun ? (sk.h - 6) / 12.5 : ((sk.h + 24 - 18.5) % 24) / 11.5;
+    const x = 60 + u * (W - 120), y = 70 - Math.sin(u * Math.PI) * 55;
+    if (isSun) {
+      const sg = ctx.createRadialGradient(x, y, 2, x, y, 40); sg.addColorStop(0, 'rgba(255,214,120,.55)'); sg.addColorStop(1, 'rgba(255,214,120,0)');
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(x, y, 40, 0, 7); ctx.fill();
+      ctx.fillStyle = '#ffd37a'; ctx.beginPath(); ctx.arc(x, y, 11, 0, 7); ctx.fill();
+    } else {
+      ctx.fillStyle = '#e6edf3'; ctx.beginPath(); ctx.arc(x, y, 10, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgb(${top.map((v) => v | 0).join(',')})`; ctx.beginPath(); ctx.arc(x + 4, y - 3, 9, 0, 7); ctx.fill();
+    }
+  }
+  function drawFloor() {
+    const x0 = -0.6, y0 = -0.6, x1 = 24.9, y1 = 14.9;
+    poly([iso(x0, y0), iso(x1, y0), iso(x1, y1), iso(x0, y1)], '#151b23', '#202833');
+    ctx.strokeStyle = 'rgba(255,255,255,.035)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = 0; x <= 24; x += 1) { const a = iso(x, y0), b = iso(x, y1); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    for (let y = 0; y <= 14; y += 1) { const a = iso(x0, y), b = iso(x1, y); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    ctx.stroke();
   }
 
   function screen(x, y, w, z1, z2, lit, t, seed) {
@@ -236,14 +296,49 @@
   let agentList = [];
 
   const SLOTS = [[1.85, 2.0], [3.0, 1.0], [0.9, 2.9], [3.1, 2.8], [1.0, 1.4], [2.0, 3.2]];
+  // na Sala de Jogos: os dois primeiros jogam ping-pong, os outros tomam café
+  const GAME_SLOTS = [[0.1, 2.45], [2.4, 2.35], [3.0, 1.0], [1.0, 1.1], [3.1, 3.0], [2.0, 3.2]];
+  // Pré-visualização opcional pela URL: ?pausa=10 (segundos até ir para a Sala de Jogos) e ?hora=23 (hora de Brasília)
+  const QS = new URLSearchParams(location.search);
+  const IDLE_TO_GAMES_MS = QS.has('pausa') ? Math.max(1, Number(QS.get('pausa')) || 180) * 1000 : 3 * 60e3;
+  const effRoom = (a, s) => (a.status === 'ocioso' && s && s.idleSince && Date.now() - s.idleSince > IDLE_TO_GAMES_MS ? 'Sala de Jogos' : a.room);
   function slotFor(a, list) {
-    const same = list.filter((x) => x.room === a.room);
+    const room = effRoom(a, sprites.get(a.id));
+    const same = list.filter((x) => effRoom(x, sprites.get(x.id)) === room);
     const k = Math.max(0, same.findIndex((x) => x.id === a.id));
-    const s = SLOTS[k % SLOTS.length];
-    const o = roomOrigin(roomIdx(a.room));
-    return { x: o.gx + s[0], y: o.gy + s[1], k };
+    const game = room === 'Sala de Jogos' && a.status === 'ocioso';
+    const sl = (game ? GAME_SLOTS : SLOTS)[k % SLOTS.length];
+    const o = roomOrigin(roomIdx(room));
+    return { x: o.gx + sl[0], y: o.gy + sl[1], k, room, game };
   }
-  const door = () => { const o = roomOrigin(roomIdx('Entrada')); return { x: o.gx + 1.75, y: o.gy + 0.35 }; };
+  const door = () => { const o = roomOrigin(roomIdx('Entrada')); return { x: o.gx + 1.75, y: o.gy + 0.2 }; };
+
+  // ---------------------------------------------------------------- corredores
+  // Cada sala tem a porta no lado direito; corredores verticais em x = col*5+4.25 e horizontais em y = linha*5+4.25.
+  function roomAtPoint(x, y) {
+    for (let i = 0; i < ROOMS.length; i++) { const o = roomOrigin(i); if (x >= o.gx - 0.05 && x <= o.gx + S + 0.05 && y >= o.gy - 0.05 && y <= o.gy + S + 0.05) return i; }
+    return -1;
+  }
+  function route(fx, fy, tx, ty) {
+    const A = roomAtPoint(fx, fy), B = roomAtPoint(tx, ty);
+    if (A === B && A >= 0) return [[tx, ty]];
+    const pts = [];
+    let vx;
+    if (A >= 0) { const o = roomOrigin(A); pts.push([o.gx + S - 0.3, o.gy + 1.75], [o.gx + 4.25, o.gy + 1.75]); vx = o.gx + 4.25; }
+    else { vx = Math.min(24.25, Math.max(4.25, Math.round((fx - 4.25) / 5) * 5 + 4.25)); pts.push([vx, fy]); }
+    if (B >= 0) {
+      const o = roomOrigin(B), hy = o.gy + 4.25, bvx = o.gx + 4.25;
+      pts.push([vx, hy], [bvx, hy], [bvx, o.gy + 1.75], [o.gx + S - 0.3, o.gy + 1.75]);
+    }
+    pts.push([tx, ty]);
+    return pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.01);
+  }
+  function goTo(s, x, y) {
+    if (s.goalX !== undefined && Math.abs(s.goalX - x) < 0.01 && Math.abs(s.goalY - y) < 0.01) return;
+    s.goalX = x; s.goalY = y;
+    if (reduced) { s.x = x; s.y = y; s.path = []; return; }
+    s.path = route(s.x, s.y, x, y);
+  }
 
   function styleFor(s, a) {
     const st = STYLE[a.role];
@@ -279,7 +374,7 @@
       if (!s) {
         const parent = a.parent && sprites.get(a.parent);
         const h = hash(a.id);
-        s = { x: parent ? parent.x : ent.gx + 1.75, y: parent ? parent.y : ent.gy + 0.6, alpha: reduced ? 1 : 0, dir: 1, away: false,
+        s = { x: parent ? parent.x : ent.gx + 1.75, y: parent ? parent.y : ent.gy + 0.25, path: [], alpha: reduced ? 1 : 0, dir: 1, away: false,
           phase: 0, skin: SKIN[h % SKIN.length], hair: HAIR[(h >> 3) % HAIR.length], idColor: ID_COLORS[(h >> 5) % ID_COLORS.length],
           jump: 0, say: null, sayT: 0, lastAction: null, lastStatus: null };
         sprites.set(a.id, s);
@@ -288,16 +383,24 @@
       styleFor(s, a);
       if (s.lastStatus && s.lastStatus !== 'concluido' && a.status === 'concluido') { s.jump = 0.9; confetti(s.x, s.y); }
       if (a.action && a.action !== s.lastAction && (a.status === 'trabalhando' || a.status === 'delegando')) { s.say = a.action; s.sayT = now; }
+      if (a.status === 'ocioso') { if (s.lastStatus !== 'ocioso' || !s.idleSince) s.idleSince = Math.min(Date.now(), a.since || Date.now()); }
+      else s.idleSince = 0;
       s.lastAction = a.action; s.lastStatus = a.status;
       Object.assign(s, { data: a, leaving: false });
-      const tgt = slotFor(a, list); s.tx = tgt.x; s.ty = tgt.y; s.k = tgt.k;
-      if (reduced) { s.x = s.tx; s.y = s.ty; }
     }
+    relayout();
     for (const [id, s] of sprites) if (!ids.has(id) && !s.leaving) {
       s.leaving = true; s.leaveAt = now;
-      if (s.data && s.data.kind === 'sub') { const d = door(); s.tx = d.x; s.ty = d.y; } // sai andando pela porta
+      if (s.data && s.data.kind === 'sub') { const d = door(); goTo(s, d.x, d.y); } // sai andando pela porta
     }
     renderAgents();
+  }
+  function relayout() {
+    for (const a of agentList) {
+      const s = sprites.get(a.id); if (!s) continue;
+      const tgt = slotFor(a, agentList); s.k = tgt.k; s.game = tgt.game; s.effRoom = tgt.room;
+      goTo(s, tgt.x, tgt.y);
+    }
   }
 
   // ---------------------------------------------------------------- o boneco
@@ -331,6 +434,8 @@
     ctx.strokeStyle = s.shirt; ctx.lineWidth = 3;
     const hand = (side) => {
       if (pose === 'wave' && side === dir) return [sx + side * 9, top - 9 + Math.sin(t * 10) * 3];
+      if (pose === 'play' && side === dir) return [sx + side * 9, top + 4 + (reduced ? 0 : Math.sin(t * 4.4 + (dir > 0 ? 0 : Math.PI)) * 4)];
+      if (pose === 'coffee' && side === dir) return [sx + side * 6, top + 5];
       if (pose === 'sit' || pose === 'type') { const tap = reduced ? 0 : Math.sin(t * 22 + side * 1.7) * 1.3; return [sx + side * 4, top + 8 + tap]; }
       return [sx + side * 7 - swing * side * 3, shoulderY + 9];
     };
@@ -348,6 +453,12 @@
       if (s.acc === 'caderno') { ctx.strokeStyle = '#8b949e'; ctx.lineWidth = 0.8; for (let k = 0; k < 2; k++) { ctx.beginPath(); ctx.moveTo(mid[0] - 3, mid[1] - 1 + k * 2.5); ctx.lineTo(mid[0] + 3, mid[1] - 1 + k * 2.5); ctx.stroke(); } }
     }
     for (const h of hands) { ctx.fillStyle = s.skin; ctx.beginPath(); ctx.arc(h[0], h[1], 1.8, 0, 7); ctx.fill(); }
+    const hd = hands[dir > 0 ? 1 : 0];
+    if (pose === 'play') { ctx.fillStyle = '#d1242f'; ctx.beginPath(); ctx.ellipse(hd[0] + dir * 3, hd[1] - 2, 3.2, 4, 0, 0, 7); ctx.fill(); }
+    if (pose === 'coffee') {
+      ctx.fillStyle = '#f6f8fa'; roundRect(hd[0] - 2.5, hd[1] - 5, 5, 6, 1); ctx.fill();
+      if (!reduced) { ctx.strokeStyle = 'rgba(230,237,243,.55)'; ctx.lineWidth = 1; for (let k = 0; k < 2; k++) { const o = Math.sin(t * 3 + k * 2) * 1.5; ctx.beginPath(); ctx.moveTo(hd[0] - 1 + k * 2, hd[1] - 6); ctx.quadraticCurveTo(hd[0] + o, hd[1] - 9, hd[0] - 1 + k * 2, hd[1] - 12); ctx.stroke(); } }
+    }
 
     // cabeça
     ctx.fillStyle = s.skin; ctx.beginPath(); ctx.arc(sx, headY, 6.5, 0, 7); ctx.fill();
@@ -413,7 +524,7 @@
     if (s.alpha <= 0.01 || !s.data) return;
     const a = s.data;
     const [sx, sy0] = iso(s.x, s.y);
-    const moving = Math.hypot(s.tx - s.x, s.ty - s.y) > 0.05;
+    const moving = s.path && s.path.length > 0;
     const busy = a.status === 'trabalhando' || a.status === 'delegando';
     const atDesk = !moving && s.k === 0 && busy && a.room !== 'Entrada' && a.room !== 'Sua mesa / Aprovações';
     let pose = 'idle';
@@ -421,6 +532,8 @@
     else if (a.status === 'aguardando') pose = 'wave';
     else if (atDesk) pose = 'sit';
     else if (busy) pose = 'type';
+    else if (s.game) pose = s.k < 2 ? 'play' : 'coffee';
+    if (pose === 'play') s.dir = s.k === 0 ? 1 : -1;
     s.away = moving ? s.awayWalk : atDesk;
     const bob = pose === 'idle' && !reduced ? Math.sin(t * 2 + hash(a.id)) * 0.6 : 0;
     const sy = sy0 + bob;
@@ -428,10 +541,11 @@
     ctx.globalAlpha = s.alpha;
     const headY = drawPerson(s, sx, sy, t, pose);
     const by = headY - 18;
-    if (!drawSay(s, sx, by, t)) drawStatusIcon(s, sx, by, t);
+    if (!drawSay(s, sx, by, t) && pose !== 'play' && pose !== 'coffee') drawStatusIcon(s, sx, by, t);
 
     // nome
-    const label = a.role ? (a.role.length > 18 ? a.role.slice(0, 17) + '…' : a.role) : a.name;
+    const role = s.game && !moving ? 'Na pausa' : a.role;
+    const label = role ? (role.length > 18 ? role.slice(0, 17) + '…' : role) : a.name;
     const ly = sy0 + 15 + ((s.k || 0) % 2) * 12;
     ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff';
     ctx.strokeText(label, sx, ly); ctx.fillText(label, sx, ly);
@@ -477,21 +591,26 @@
   }
 
   // ================================================================ laço de animação
-  let last = performance.now() / 1000;
+  let last = performance.now() / 1000, lastRelayout = 0, lastSky = 0, sk = null;
   function frame() {
-    const t = performance.now() / 1000, dt = Math.min(0.05, t - last); last = t;
+    const t = performance.now() / 1000, dt = Math.max(0, Math.min(0.05, t - last)); last = t;
 
+    if (t - lastRelayout > 2) { lastRelayout = t; relayout(); }
     for (const [id, s] of sprites) {
-      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), sp = 3.4 * dt;
-      if (d > sp) {
-        s.x += (dx / d) * sp; s.y += (dy / d) * sp; s.phase += dt * 11;
+      let budget = 4.2 * dt;
+      while (s.path && s.path.length && budget > 0) {
+        const [px, py] = s.path[0];
+        const dx = px - s.x, dy = py - s.y, d = Math.hypot(dx, dy);
+        if (d <= budget) { s.x = px; s.y = py; budget -= d; s.path.shift(); continue; }
+        s.x += (dx / d) * budget; s.y += (dy / d) * budget; budget = 0;
         const sdx = dx - dy, sdy = dx + dy;          // direção na tela
         if (Math.abs(sdx) > 0.01) s.dir = sdx > 0 ? 1 : -1;
         s.awayWalk = sdy < 0;
-      } else { s.x = s.tx; s.y = s.ty; }
+      }
+      if (s.path && s.path.length) s.phase += dt * 11;
       if (s.jump > 0) s.jump = Math.max(0, s.jump - dt);
       if (s.leaving) {
-        const arrived = d <= sp || !(s.data && s.data.kind === 'sub');
+        const arrived = !(s.path && s.path.length) || !(s.data && s.data.kind === 'sub');
         if (arrived || t - s.leaveAt > 6) { s.alpha -= dt * 1.5; if (s.alpha <= 0) { sprites.delete(id); continue; } }
       } else s.alpha = Math.min(1, s.alpha + dt * 2.5);
     }
@@ -499,7 +618,9 @@
     // luz das salas
     const busyRooms = new Set(), litRooms = new Set();
     for (const a of agentList) {
+      const s = sprites.get(a.id);
       if (a.status !== 'ocioso') busyRooms.add(roomIdx(a.room));
+      if (s && s.game) busyRooms.add(roomIdx('Sala de Jogos'));
       if (a.status === 'trabalhando' || a.status === 'delegando') litRooms.add(roomIdx(a.room));
     }
     for (let i = 0; i < ROOMS.length; i++) {
@@ -507,16 +628,119 @@
       light[i] = reduced ? target : lerp(light[i], target, Math.min(1, dt * 3));
     }
 
+    if (t - lastSky > 30 || !sk) { lastSky = t; sk = sky(); }
+    const night = 1 - sk.day;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.setTransform(scale, 0, 0, scale, offX, offY);
+    const k = scale * view.z;
+    ctx.setTransform(k, 0, 0, k, offX + view.x, offY + view.y);
+    drawSky(t, sk);
+    drawFloor();
     const waiting = agentList.some((a) => a.status === 'aguardando');
     const hotIdx = waiting ? roomIdx('Sua mesa / Aprovações') : -1;
     for (let i = 0; i < ROOMS.length; i++) drawRoom(i, t, { hot: i === hotIdx, lit: litRooms.has(i), waiting: waiting && i === hotIdx });
+    if (night > 0.02) { ctx.fillStyle = `rgba(6,12,40,${0.32 * night})`; ctx.fillRect(-2000, -2000, W + 4000, H + 4000); }
+    for (let i = 0; i < ROOMS.length; i++) drawGlow(i, night);
     for (let i = 0; i < ROOMS.length; i++) drawLabel(i, i === hotIdx);
     drawLinks(t);
     [...sprites.values()].sort((a, b) => a.x + a.y - (b.x + b.y)).forEach((s) => drawAgent(s, t));
     drawParticles(dt);
+    // relógio de Brasília (fixo na tela)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const dpr = window.devicePixelRatio || 1;
+    ctx.font = `600 ${12 * dpr}px system-ui`; ctx.textAlign = 'left';
+    const txt = `${sk.txt} · ${sk.label} em Brasília`;
+    const w = ctx.measureText(txt).width + 16 * dpr;
+    ctx.fillStyle = 'rgba(13,17,23,.75)'; roundRect(10 * dpr, 10 * dpr, w, 22 * dpr, 11 * dpr); ctx.fill();
+    ctx.fillStyle = '#c9d1d9'; ctx.fillText(txt, 18 * dpr, 25 * dpr);
     requestAnimationFrame(frame);
+  }
+
+  // ================================================================ zoom, arrastar e tocar numa sala
+  const view = { z: 1, x: 0, y: 0 };
+  const pointers = new Map();
+  let gesture = null;
+  const devPoint = (e) => { const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr]; };
+  function zoomAt(px, py, factor) {
+    const k = scale * view.z, bx = offX + view.x, by = offY + view.y;
+    const lx = (px - bx) / k, ly = (py - by) / k;
+    view.z = Math.min(3.5, Math.max(1, view.z * factor));
+    const k2 = scale * view.z;
+    view.x = px - lx * k2 - offX; view.y = py - ly * k2 - offY;
+    if (view.z === 1) { view.x = 0; view.y = 0; }
+  }
+  cv.addEventListener('pointerdown', (e) => {
+    cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, devPoint(e));
+    if (pointers.size === 1) gesture = { start: devPoint(e), t: performance.now(), moved: false, vx: view.x, vy: view.y };
+    else if (pointers.size === 2) { const [a, b] = [...pointers.values()]; gesture = { pinch: Math.hypot(a[0] - b[0], a[1] - b[1]), z: view.z, moved: true }; }
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId) || !gesture) return;
+    pointers.set(e.pointerId, devPoint(e));
+    if (pointers.size === 2 && gesture.pinch) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      zoomAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (gesture.z * d / gesture.pinch) / view.z);
+    } else if (pointers.size === 1 && gesture.start) {
+      const p = devPoint(e), dx = p[0] - gesture.start[0], dy = p[1] - gesture.start[1];
+      if (Math.hypot(dx, dy) > 8 * (window.devicePixelRatio || 1)) gesture.moved = true;
+      if (gesture.moved && view.z > 1) { view.x = gesture.vx + dx; view.y = gesture.vy + dy; }
+    }
+  });
+  const endPointer = (e) => {
+    const g = gesture; pointers.delete(e.pointerId);
+    if (pointers.size === 0) {
+      if (g && g.start && !g.moved && performance.now() - g.t < 400) tapAt(devPoint(e));
+      gesture = null;
+    }
+  };
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); const p = devPoint(e); zoomAt(p[0], p[1], e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+  cv.addEventListener('dblclick', () => { view.z = 1; view.x = 0; view.y = 0; });
+
+  function tapAt([px, py]) {
+    const k = scale * view.z;
+    const lx = (px - offX - view.x) / k, ly = (py - offY - view.y) / k;
+    const a = (lx - OX) / (TW / 2), b = (ly - OY) / (TH / 2);
+    const i = roomAtPoint((a + b) / 2, (b - a) / 2);
+    if (i < 0) { closeCard(); return; }
+    openCard(ROOMS[i]);
+  }
+
+  const card = document.getElementById('roomcard');
+  function closeCard() { card.hidden = true; }
+  async function openCard(room) {
+    card.replaceChildren();
+    const head = el('div', 'rc-head'); head.append(el('b', null, room));
+    const x = el('button', 'rc-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Fechar'); x.addEventListener('click', closeCard); head.append(x);
+    card.append(head);
+    const now = agentList.filter((a) => effRoom(a, sprites.get(a.id)) === room);
+    card.append(el('div', 'rc-sub', 'Agora'));
+    if (!now.length) card.append(el('div', 'rc-empty', 'Ninguém nesta sala.'));
+    for (const a of now) card.append(el('div', 'rc-row', `${a.role} ${a.tag || ''} — ${(STAT[a.status] || STAT.ocioso)[1]}`));
+    card.append(el('div', 'rc-sub', 'Passaram hoje'));
+    const list = el('div', 'rc-list', 'carregando…'); card.append(list);
+    card.hidden = false;
+    try {
+      const r = await fetch('/history', { credentials: 'same-origin' });
+      if (r.status === 401) { location.href = '/login'; return; }
+      const all = await r.json();
+      const today = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
+      const fmtDay = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
+      const fmtTime = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+      const groups = new Map();
+      for (const v of all) {
+        if (v.room !== room || fmtDay.format(new Date(v.t)) !== today) continue;
+        const key = v.role + ' ' + v.tag;
+        const g = groups.get(key) || { key, n: 0, first: v.t, last: v.t, sub: v.kind === 'sub' };
+        g.n++; g.last = Math.max(g.last, v.t); g.first = Math.min(g.first, v.t); groups.set(key, g);
+      }
+      list.replaceChildren();
+      if (!groups.size) list.append(el('div', 'rc-empty', 'Ninguém passou por aqui hoje.'));
+      for (const g of [...groups.values()].sort((p, q) => q.last - p.last)) {
+        list.append(el('div', 'rc-row', `${g.key}${g.sub ? ' (subagente)' : ''} — ${g.n}× · ${fmtTime.format(new Date(g.first))}${g.n > 1 ? '–' + fmtTime.format(new Date(g.last)) : ''}`));
+      }
+    } catch { list.textContent = 'Não foi possível carregar o histórico.'; }
   }
 
   // ================================================================ painel lateral (sem innerHTML com dados)
@@ -577,6 +801,9 @@
   document.getElementById('demo').addEventListener('click', () => {
     fetch('/demo', { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'agentes-office' } }).catch(() => {});
   });
+
+  setTimeout(() => { const h = document.getElementById('hint'); if (h) h.classList.add('off'); }, 8000);
+  cv.addEventListener('pointerdown', () => { const h = document.getElementById('hint'); if (h) h.classList.add('off'); }, { once: true });
 
   resize();
   connect();
