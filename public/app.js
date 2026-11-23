@@ -1,4 +1,12 @@
 'use strict';
+// Compatibilidade com navegadores antigos (TVs): append / replaceChildren
+(function () {
+  const P = Element.prototype;
+  if (!P.append) P.append = function () { for (let i = 0; i < arguments.length; i++) { const n = arguments[i]; this.appendChild(typeof n === 'string' ? document.createTextNode(n) : n); } };
+  if (!P.prepend) P.prepend = function (n) { this.insertBefore(typeof n === 'string' ? document.createTextNode(n) : n, this.firstChild); };
+  if (!P.replaceChildren) P.replaceChildren = function () { while (this.firstChild) this.removeChild(this.firstChild); this.append.apply(this, arguments); };
+  if (!P.remove) P.remove = function () { if (this.parentNode) this.parentNode.removeChild(this); };
+})();
 (() => {
   // ================================================================ base do desenho
   const W = 960, H = 560;                // coordenadas lógicas
@@ -114,14 +122,17 @@
   }
 
   // ================================================================ céu, chão e corredores
-  const TZ = 'Etc/GMT+4';   // UTC-4 fixo (no Intl o sinal é invertido)
+  // Horário local fixo em UTC-4, calculado à mão (navegadores de TV nem sempre aceitam fuso no Intl)
+  const OFF_MS = 4 * 3600e3;
+  const p2 = (n) => (n < 10 ? '0' : '') + n;
+  const local = (ms) => { const d = new Date(ms - OFF_MS); return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(), h: d.getUTCHours(), mi: d.getUTCMinutes(), wd: d.getUTCDay() }; };
+  const hm = (ms) => { const l = local(ms); return p2(l.h) + ':' + p2(l.mi); };
+  const dayStr = (ms) => { const l = local(ms); return p2(l.d) + '/' + p2(l.mo) + '/' + l.y; };
+  const WD = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
   function brasilia() {
-    if (QS.has('hora')) { const h = Math.min(23.99, Math.max(0, Number(QS.get('hora')) || 0)); return { h, txt: String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.round((h % 1) * 60)).padStart(2, '0') + ' (prévia)' }; }
-    try {
-      const parts = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-      const h = Number(parts.find((x) => x.type === 'hour').value) % 24, m = Number(parts.find((x) => x.type === 'minute').value);
-      return { h: h + m / 60, txt: String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') };
-    } catch { const d = new Date(); return { h: d.getHours() + d.getMinutes() / 60, txt: d.toTimeString().slice(0, 5) }; }
+    if (QS.has('hora')) { const h = Math.min(23.99, Math.max(0, Number(QS.get('hora')) || 0)); return { h, txt: p2(Math.floor(h)) + ':' + p2(Math.round((h % 1) * 60)) + ' (prévia)' }; }
+    const l = local(Date.now());
+    return { h: l.h + l.mi / 60, txt: p2(l.h) + ':' + p2(l.mi) };
   }
   const smooth = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
   function sky() {
@@ -165,13 +176,10 @@
   const fmtTok = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' bi' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' mi' : n >= 1e3 ? (n / 1e3).toFixed(1) + ' mil' : String(Math.round(n))).replace('.', ',');
   function fmtReset(sec) {
     if (!sec) return '';
-    const d = new Date(sec * 1000);
-    const now = new Date();
-    const sameDay = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit' });
-    const hm = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(d);
-    if (sameDay.format(d) === sameDay.format(now)) return 'renova às ' + hm;
-    const wd = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' }).format(d).replace('.', '');
-    return 'renova ' + wd + ' ' + hm;
+    const ms = sec * 1000;
+    if (dayStr(ms) === dayStr(Date.now())) return 'renova às ' + hm(ms);
+    const l = local(ms);
+    return 'renova ' + WD[l.wd] + ', ' + p2(l.d) + '/' + p2(l.mo) + ' ' + hm(ms);
   }
   const barColor = (p) => (p >= 85 ? '#ff7b72' : p >= 60 ? '#e3b341' : '#3fb950');
   function drawUsageBoard() {
@@ -940,7 +948,7 @@
     }
     card.hidden = false;
   }
-  async function openCard(room) {
+  function openCard(room) {
     card.replaceChildren();
     const head = el('div', 'rc-head'); head.append(el('b', null, dispName(room)));
     const x = el('button', 'rc-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Fechar'); x.addEventListener('click', closeCard); head.append(x);
@@ -952,16 +960,15 @@
     card.append(el('div', 'rc-sub', 'Passaram hoje'));
     const list = el('div', 'rc-list', 'carregando…'); card.append(list);
     card.hidden = false;
-    try {
-      const r = await fetch('/history', { credentials: 'same-origin' });
-      if (r.status === 401) { location.href = '/login'; return; }
-      const all = await r.json();
-      const today = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
-      const fmtDay = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
-      const fmtTime = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+    fetch('/history', { credentials: 'same-origin' }).then((r) => {
+      if (r.status === 401) { location.href = '/login'; return null; }
+      return r.json();
+    }).then((all) => {
+      if (!all) return;
+      const today = dayStr(Date.now());
       const groups = new Map();
       for (const v of all) {
-        if (v.room !== room || fmtDay.format(new Date(v.t)) !== today) continue;
+        if (v.room !== room || dayStr(v.t) !== today) continue;
         const key = v.role + ' ' + v.tag;
         const g = groups.get(key) || { key, n: 0, first: v.t, last: v.t, sub: v.kind === 'sub' };
         g.n++; g.last = Math.max(g.last, v.t); g.first = Math.min(g.first, v.t); groups.set(key, g);
@@ -969,9 +976,9 @@
       list.replaceChildren();
       if (!groups.size) list.append(el('div', 'rc-empty', 'Ninguém passou por aqui hoje.'));
       for (const g of [...groups.values()].sort((p, q) => q.last - p.last)) {
-        list.append(el('div', 'rc-row', `${g.key}${g.sub ? ' (subagente)' : ''} — ${g.n}× · ${fmtTime.format(new Date(g.first))}${g.n > 1 ? '–' + fmtTime.format(new Date(g.last)) : ''}`));
+        list.append(el('div', 'rc-row', `${g.key}${g.sub ? ' (subagente)' : ''} — ${g.n}× · ${hm(g.first)}${g.n > 1 ? '–' + hm(g.last) : ''}`));
       }
-    } catch { list.textContent = 'Não foi possível carregar o histórico.'; }
+    }).catch(() => { list.textContent = 'Não foi possível carregar o histórico.'; });
   }
 
   // ================================================================ painel lateral (sem innerHTML com dados)
@@ -1010,22 +1017,49 @@
   const live = document.getElementById('live');
   function setLive(state, text) { live.className = state; live.querySelector('span').textContent = text; }
 
+  function applyState(s) {
+    if (Array.isArray(s.rooms) && s.rooms.length) ROOMS = s.rooms;
+    document.getElementById('foot').textContent = 'Modo de detalhe: ' + (s.detail === 'normal' ? 'normal (mostra detalhes curtos)' : 'mínimo (só ferramenta e tipo de evento)');
+    elLog.replaceChildren(); s.log.forEach(addLog);
+    USAGE = s.usage || null;
+    setAgents(s.agents);
+  }
+
+  // Plano B para navegadores sem conexão ao vivo (algumas TVs): busca o estado a cada 3 s
+  let polling = false;
+  function startPolling() {
+    if (polling) return;
+    polling = true;
+    let lastLog = -1;
+    const tick = () => {
+      fetch('/state', { credentials: 'same-origin', cache: 'no-store' }).then((r) => {
+        if (r.status === 401) { location.href = '/login'; return null; }
+        return r.json();
+      }).then((s) => {
+        if (!s) return;
+        setLive('on', 'AO VIVO');
+        const top = s.log.length ? s.log[s.log.length - 1].id : 0;
+        if (top !== lastLog) { lastLog = top; applyState(s); }
+        else { USAGE = s.usage || null; setAgents(s.agents); }
+      }).catch(() => setLive('off', 'reconectando…')).then(() => setTimeout(tick, 3000));
+    };
+    tick();
+  }
+
   function connect() {
+    if (!window.EventSource || QS.has('modo-simples')) { startPolling(); return; }
+    let opened = false;
     const es = new EventSource('/events');
-    es.addEventListener('open', () => setLive('on', 'AO VIVO'));
+    // se a conexão ao vivo não abrir em 10 s (rede ou navegador que segura o fluxo), muda para o plano B
+    setTimeout(() => { if (!opened) { try { es.close(); } catch (e) { /* nada */ } startPolling(); } }, 10000);
+    es.addEventListener('open', () => { opened = true; setLive('on', 'AO VIVO'); });
     es.addEventListener('error', () => {
+      if (polling) return;
       setLive('off', 'reconectando…');
       // se a sessão expirou, o /events responde 401: volta para o login
       fetch('/state', { credentials: 'same-origin' }).then((r) => { if (r.status === 401) location.href = '/login'; }).catch(() => {});
     });
-    es.addEventListener('state', (m) => {
-      const s = JSON.parse(m.data);
-      if (Array.isArray(s.rooms) && s.rooms.length) ROOMS = s.rooms;
-      document.getElementById('foot').textContent = 'Modo de detalhe: ' + (s.detail === 'normal' ? 'normal (mostra detalhes curtos)' : 'mínimo (só ferramenta e tipo de evento)');
-      elLog.replaceChildren(); s.log.forEach(addLog);
-      USAGE = s.usage || null;
-      setAgents(s.agents);
-    });
+    es.addEventListener('state', (m) => { opened = true; applyState(JSON.parse(m.data)); });
     es.addEventListener('agents', (m) => setAgents(JSON.parse(m.data)));
     es.addEventListener('log', (m) => addLog(JSON.parse(m.data)));
     es.addEventListener('usage', (m) => { USAGE = JSON.parse(m.data); });
