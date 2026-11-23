@@ -7,7 +7,8 @@
  * custo estimado e os limites de 5 horas e semanal (planos Pro/Max).
  * Este script:
  *   1. mostra a barra de status (a sua barra antiga, se havia uma, continua igual);
- *   2. envia SÓ NÚMEROS para o painel (POST /usage), no máximo a cada 20 s.
+ *   2. envia SÓ NÚMEROS para o painel (POST /usage), no máximo a cada 20 s, incluindo a economia
+ *      do context-mode (bytes produzidos x bytes que voltaram à conversa), se ele estiver instalado.
  * Nunca envia prompts, nomes de arquivos ou pastas. Nunca trava: teto de 2 s.
  */
 const fs = require('fs');
@@ -45,6 +46,47 @@ function payloadFrom(d) {
     five_hour: lim(rl.five_hour),
     seven_day: lim(rl.seven_day),
   };
+}
+
+// ---------------------------------------------------------------- context-mode
+// Lê, só para leitura, os bancos do context-mode (~/.context-mode/projects/*/context.db) e soma, como o ctx_stats,
+// os bytes que as ferramentas produziram e os que voltaram para a conversa. Só totais saem daqui.
+const DAY_MS = 864e5, TZ_OFFSET_MS = 4 * 3600e3;   // dia e semana em UTC-4
+function ctxStats(sessionId) {
+  let sqlite;
+  const ew = process.emitWarning;
+  try { process.emitWarning = () => {}; sqlite = require('node:sqlite'); } catch { return undefined; } // Node antigo: sem dados
+  finally { process.emitWarning = ew; }
+  const root = process.env.CONTEXT_MODE_DIR || path.join(os.homedir(), '.context-mode');
+  const dbs = [];
+  try {
+    for (const d of fs.readdirSync(path.join(root, 'projects'))) {
+      const f = path.join(root, 'projects', d, 'context.db');
+      if (fs.existsSync(f)) dbs.push(f);
+    }
+  } catch { return undefined; }
+  if (!dbs.length) return undefined;
+  const now = Date.now();
+  const dayStart = Math.floor((now - TZ_OFFSET_MS) / DAY_MS) * DAY_MS + TZ_OFFSET_MS;
+  const dow = (new Date(now - TZ_OFFSET_MS).getUTCDay() + 6) % 7;      // 0 = segunda
+  const weekStart = dayStart - dow * DAY_MS;
+  const CALLS = "tool IS NOT NULL AND kind <> 'cost' AND tool <> 'ctx_stats'";
+  const z = () => ({ produced: 0, returned: 0, calls: 0 });
+  const out = { all: z(), today: z(), week: z(), session: z() };
+  for (const f of dbs) {
+    let db;
+    try {
+      db = new sqlite.DatabaseSync(f, { readOnly: true });
+      const q = (where, ...args) => db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(sandbox_bytes),0) AS produced, COALESCE(SUM(returned_bytes),0) AS returned FROM events WHERE ${CALLS}${where}`).get(...args);
+      const add = (k, r) => { if (r) { out[k].produced += Number(r.produced) || 0; out[k].returned += Number(r.returned) || 0; out[k].calls += Number(r.calls) || 0; } };
+      add('all', q(''));
+      add('today', q(' AND created_at >= ?', dayStart));
+      add('week', q(' AND created_at >= ?', weekStart));
+      if (sessionId) add('session', q(' AND session_id = ?', String(sessionId)));
+    } catch { /* banco em uso, outra versão ou corrompido: pula */ }
+    finally { try { if (db) db.close(); } catch { /* nada */ } }
+  }
+  return out.all.calls ? out : undefined;
 }
 
 function shouldSend(p) {
@@ -97,9 +139,16 @@ function main() {
     // 2) os números para o painel
     const p = payloadFrom(d);
     if (!p.session_id || !shouldSend(p)) return quit();
+    try {
+      const c = ctxStats(p.session_id);
+      if (c) {
+        p.context_mode = c;
+        p.machine = require('crypto').createHash('sha256').update('agentes-office:' + os.hostname()).digest('hex').slice(0, 12);
+      }
+    } catch { /* sem economia desta vez */ }
     send(p, loadConfig());
   });
 }
 
 if (require.main === module) main();
-module.exports = { payloadFrom, ownLine };
+module.exports = { payloadFrom, ownLine, ctxStats };

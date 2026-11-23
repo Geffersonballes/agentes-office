@@ -29,6 +29,8 @@ No céu, perto do sol, um quadro mostra **tokens de hoje e da semana** (UTC-4, s
 
 Esses dados vêm da **barra de status** do Claude Code (`statusline.js`), o único lugar onde o Claude Code entrega uso e limites. O `install.js` instala a barra de status; se você já tinha uma, ela continua aparecendo (fica guardada em `statusline_original` no `~/.agentes-office.json` e volta no `--uninstall`). Só números são enviados (`POST /usage`, mesmo token do hook), no máximo a cada 20 s. Para não instalar: `node install.js --sem-statusline`.
 
+**Economia do context-mode.** Se o plugin [context-mode](https://github.com/mksglu/context-mode) estiver instalado no PC, o `statusline.js` também lê, só para leitura, os bancos dele (`~/.context-mode/projects/*/context.db`, Node 22.13+ ou 24) e soma como o `ctx_stats`: bytes que as ferramentas produziram × bytes que voltaram para a conversa. O quadro mostra os tokens poupados hoje, na semana e no total (4 bytes ≈ 1 token) e a % que ficou fora da conversa. Só os totais saem do PC; o conteúdo dos bancos nunca é enviado.
+
 Observações: a Anthropic não tem limite diário (só 5 horas e semanal); os limites só aparecem em planos Pro/Max e depois da primeira resposta da sessão; os totais ficam na memória do servidor e zeram quando ele reinicia.
 
 ## Segurança

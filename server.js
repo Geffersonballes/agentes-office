@@ -273,7 +273,7 @@ function publicAgent(a) {
 const TZ_OFFSET_MS = 4 * 3600e3;
 const dayKey = (t) => new Date(t - TZ_OFFSET_MS).toISOString().slice(0, 10);
 const weekKey = (t) => { const d = new Date(t - TZ_OFFSET_MS); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
-const usage = { sessions: new Map(), five_hour: null, seven_day: null, updated: 0 };
+const usage = { sessions: new Map(), five_hour: null, seven_day: null, updated: 0, ctx: new Map() };
 const num = (v, max) => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= max ? v : null);
 function sanitizeUsage(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -283,8 +283,12 @@ function sanitizeUsage(raw) {
     const pct = num(o.used_percentage, 100), at = num(o.resets_at, 4e9);
     return pct === null ? null : { used_percentage: pct, resets_at: at };
   };
+  const scope = (o) => (o && typeof o === 'object' ? { produced: num(o.produced, 1e15) || 0, returned: num(o.returned, 1e15) || 0, calls: num(o.calls, 1e9) || 0 } : null);
+  const cm = raw.context_mode && typeof raw.context_mode === 'object' ? raw.context_mode : null;
+  const machine = typeof raw.machine === 'string' && /^[a-f0-9]{6,32}$/.test(raw.machine) ? raw.machine : null;
   return { session_id: sid, input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
-    cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day) };
+    cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day),
+    ctx: cm && machine ? { machine, all: scope(cm.all), today: scope(cm.today), week: scope(cm.week), session: scope(cm.session) } : null };
 }
 function applyUsage(u) {
   const now = Date.now(), day = dayKey(now), week = weekKey(now);
@@ -301,7 +305,9 @@ function applyUsage(u) {
   r.t = now;
   if (u.five_hour) usage.five_hour = Object.assign({ t: now }, u.five_hour);
   if (u.seven_day) usage.seven_day = Object.assign({ t: now }, u.seven_day);
+  if (u.ctx) usage.ctx.set(u.ctx.machine, Object.assign({}, u.ctx, { t: now, dayKey: day, weekKey: week }));
   usage.updated = now;
+  for (const [id, x] of usage.ctx) if (now - x.t > 9 * 864e5) usage.ctx.delete(id);
   for (const [id, x] of usage.sessions) if (now - x.t > 9 * 864e5) usage.sessions.delete(id);
 }
 function usageSummary() {
@@ -313,6 +319,19 @@ function usageSummary() {
   }
   const live = (l) => (l && (!l.resets_at || l.resets_at * 1000 > now) ? { used_percentage: l.used_percentage, resets_at: l.resets_at } : null);
   out.five_hour = live(usage.five_hour); out.seven_day = live(usage.seven_day);
+  // economia do context-mode: soma das máquinas (cada uma manda os totais do próprio disco)
+  if (usage.ctx.size) {
+    const z = () => ({ produced: 0, returned: 0, calls: 0 });
+    const c = { all: z(), today: z(), week: z(), machines: usage.ctx.size, updated: 0 };
+    for (const m of usage.ctx.values()) {
+      const add = (k, src) => { if (src) { c[k].produced += src.produced; c[k].returned += src.returned; c[k].calls += src.calls; } };
+      add('all', m.all);
+      if (m.dayKey === day) add('today', m.today);
+      if (m.weekKey === week) add('week', m.week);
+      c.updated = Math.max(c.updated, m.t);
+    }
+    out.context_mode = c;
+  }
   out.updated = usage.updated || null;
   return out;
 }

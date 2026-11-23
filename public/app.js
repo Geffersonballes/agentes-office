@@ -159,7 +159,9 @@
   }
   // ================================================================ quadro de uso (tokens e limites), perto do sol
   let USAGE = null;
-  const BOARD = { x: 728, y: 74, w: 222, h: 150 };
+  const BOARD = { x: 742, y: 30, w: 210, h: 196 };
+  const saved = (sc) => Math.max(0, (sc ? sc.produced - sc.returned : 0));
+  const savedPct = (sc) => (sc && sc.produced > 0 ? Math.round((saved(sc) / sc.produced) * 1000) / 10 : 0);
   const fmtTok = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' bi' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' mi' : n >= 1e3 ? (n / 1e3).toFixed(1) + ' mil' : String(Math.round(n))).replace('.', ',');
   function fmtReset(sec) {
     if (!sec) return '';
@@ -176,34 +178,45 @@
     const { x, y, w, h } = BOARD;
     // hastes penduradas
     ctx.strokeStyle = 'rgba(201,209,217,.35)'; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.moveTo(x + 30, y - 40); ctx.lineTo(x + 30, y); ctx.moveTo(x + w - 30, y - 40); ctx.lineTo(x + w - 30, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 30, y - 30); ctx.lineTo(x + 30, y); ctx.moveTo(x + w - 30, y - 30); ctx.lineTo(x + w - 30, y); ctx.stroke();
     ctx.fillStyle = 'rgba(13,17,23,.92)'; roundRect(x, y, w, h, 10); ctx.fill();
     ctx.strokeStyle = '#8a6d4f'; ctx.lineWidth = 3; roundRect(x, y, w, h, 10); ctx.stroke();
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#e6edf3'; ctx.font = '700 12px system-ui'; ctx.fillText('Uso do Claude', x + 12, y + 19);
+    ctx.fillStyle = '#e6edf3'; ctx.font = '700 12px system-ui'; ctx.fillText('Uso do Claude', x + 12, y + 18);
     const u = USAGE;
     ctx.font = '500 9px system-ui'; ctx.fillStyle = '#8b949e'; ctx.textAlign = 'right';
-    if (u && u.updated) { const m = Math.max(0, Math.round((Date.now() - u.updated) / 60000)); ctx.fillText(m < 1 ? 'agora' : 'há ' + m + ' min', x + w - 12, y + 19); }
+    if (u && u.updated) { const m = Math.max(0, Math.round((Date.now() - u.updated) / 60000)); ctx.fillText(m < 1 ? 'agora' : 'há ' + m + ' min', x + w - 12, y + 18); }
     ctx.textAlign = 'left';
     if (!u || !u.updated) {
       ctx.fillStyle = '#8b949e'; ctx.font = '500 10px system-ui';
-      ['Aguardando dados da barra de status', 'do Claude Code. Reinstale com o', 'instalar.bat para ligar o quadro.'].forEach((l, k) => ctx.fillText(l, x + 12, y + 44 + k * 14));
+      ['Aguardando dados da barra de status', 'do Claude Code. Reinstale com o', 'instalar.bat para ligar o quadro.'].forEach((l, k) => ctx.fillText(l, x + 12, y + 42 + k * 14));
       return;
     }
-    ctx.font = '600 10.5px system-ui'; ctx.fillStyle = '#c9d1d9';
-    ctx.fillText('Tokens hoje', x + 12, y + 40); ctx.fillText('Tokens na semana', x + 116, y + 40);
+    ctx.font = '600 10px system-ui'; ctx.fillStyle = '#c9d1d9';
+    ctx.fillText('Tokens hoje', x + 12, y + 36); ctx.fillText('Tokens na semana', x + 110, y + 36);
     ctx.font = '700 13px system-ui'; ctx.fillStyle = '#e6edf3';
-    ctx.fillText(fmtTok(u.today.input + u.today.output), x + 12, y + 56); ctx.fillText(fmtTok(u.week.input + u.week.output), x + 116, y + 56);
-    const rows = [['Limite de 5 horas', u.five_hour], ['Limite semanal', u.seven_day]];
-    rows.forEach(([label, l], k) => {
-      const yy = y + 76 + k * 36;
+    ctx.fillText(fmtTok(u.today.input + u.today.output), x + 12, y + 51); ctx.fillText(fmtTok(u.week.input + u.week.output), x + 110, y + 51);
+    [['Limite de 5 horas', u.five_hour], ['Limite semanal', u.seven_day]].forEach(([label, l], k) => {
+      const yy = y + 69 + k * 31;
       ctx.font = '600 10px system-ui'; ctx.fillStyle = '#c9d1d9'; ctx.fillText(label, x + 12, yy);
       ctx.textAlign = 'right'; ctx.font = '700 10px system-ui';
       ctx.fillStyle = l ? barColor(l.used_percentage) : '#8b949e'; ctx.fillText(l ? Math.round(l.used_percentage) + '%' : '—', x + w - 12, yy); ctx.textAlign = 'left';
-      ctx.fillStyle = '#21262d'; roundRect(x + 12, yy + 5, w - 24, 7, 3.5); ctx.fill();
-      if (l) { ctx.fillStyle = barColor(l.used_percentage); roundRect(x + 12, yy + 5, Math.max(7, (w - 24) * Math.min(100, l.used_percentage) / 100), 7, 3.5); ctx.fill(); }
+      ctx.fillStyle = '#21262d'; roundRect(x + 12, yy + 4, w - 24, 6, 3); ctx.fill();
+      if (l) { ctx.fillStyle = barColor(l.used_percentage); roundRect(x + 12, yy + 4, Math.max(6, (w - 24) * Math.min(100, l.used_percentage) / 100), 6, 3); ctx.fill(); }
       ctx.font = '500 9px system-ui'; ctx.fillStyle = '#8b949e';
-      ctx.fillText(l ? fmtReset(l.resets_at) : 'aparece após a 1ª resposta (Pro/Max)', x + 12, yy + 23);
+      ctx.fillText(l ? fmtReset(l.resets_at) : 'aparece após a 1ª resposta (Pro/Max)', x + 12, yy + 20);
+    });
+    // economia do context-mode
+    const yc = y + 136;
+    ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + 12, yc - 7); ctx.lineTo(x + w - 12, yc - 7); ctx.stroke();
+    ctx.font = '700 10.5px system-ui'; ctx.fillStyle = '#56d364'; ctx.fillText('context-mode economizou', x + 12, yc + 6);
+    const cm = u.context_mode;
+    if (!cm) { ctx.font = '500 9px system-ui'; ctx.fillStyle = '#8b949e'; ctx.fillText('sem dados: instale/atualize no PC', x + 12, yc + 21); return; }
+    [['Hoje', cm.today], ['Semana', cm.week], ['Total', cm.all]].forEach(([lab, sc], k) => {
+      const yy = yc + 20 + k * 13;
+      ctx.font = '600 10px system-ui'; ctx.fillStyle = '#c9d1d9'; ctx.fillText(lab, x + 12, yy);
+      ctx.font = '700 10px system-ui'; ctx.fillStyle = '#e6edf3'; ctx.fillText(sc && sc.produced ? fmtTok(saved(sc) / 4) + ' tokens' : '—', x + 60, yy);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#56d364'; ctx.fillText(sc && sc.produced ? savedPct(sc).toString().replace('.', ',') + '%' : '', x + w - 12, yy); ctx.textAlign = 'left';
     });
   }
 
@@ -913,6 +926,18 @@
       card.append(el('div', 'rc-row', l ? `${label}: ${Math.round(l.used_percentage)}% usado · ${fmtReset(l.resets_at)}` : `${label}: sem dado ainda`));
     }
     card.append(el('div', 'rc-empty', 'A Anthropic não tem limite diário: os limites são a janela de 5 horas e a semanal.'));
+    card.append(el('div', 'rc-sub', 'Economia do context-mode'));
+    const cm = u.context_mode;
+    if (!cm) card.append(el('div', 'rc-empty', 'Sem dados ainda. O context-mode precisa estar instalado no PC e o instalar.bat rodado de novo.'));
+    else {
+      const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(1) + ' KB').replace('.', ',');
+      for (const [lab, sc] of [['Hoje', cm.today], ['Semana', cm.week], ['Total', cm.all]]) {
+        card.append(el('div', 'rc-row', sc && sc.produced
+          ? `${lab}: ${kb(sc.produced)} produzidos → ${kb(sc.returned)} na conversa · ${savedPct(sc).toString().replace('.', ',')}% fora · ≈ ${fmtTok(saved(sc) / 4)} tokens poupados (${sc.calls} chamadas)`
+          : `${lab}: nenhuma chamada do context-mode ainda`));
+      }
+      card.append(el('div', 'rc-empty', 'Tokens estimados a 4 bytes por token, como o próprio ctx_stats.'));
+    }
     card.hidden = false;
   }
   async function openCard(room) {

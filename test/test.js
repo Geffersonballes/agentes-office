@@ -315,3 +315,42 @@ test('install: instala a barra de status guardando a original e devolve ao desin
   s = JSON.parse(fs.readFileSync(settings, 'utf8'));
   assert.deepStrictEqual(s.statusLine, { type: 'command', command: 'echo antiga', padding: 1 });
 });
+
+test('context-mode: lê a economia do context.db e mostra no painel', async () => {
+  let sqlite; try { sqlite = require('node:sqlite'); } catch { return; }   // Node sem sqlite: pula
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-cm-'));
+  const proj = path.join(dir, 'projects', 'abcdef0123456789'); fs.mkdirSync(proj, { recursive: true });
+  const db = new sqlite.DatabaseSync(path.join(proj, 'context.db'));
+  db.exec(`CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, worktree TEXT NOT NULL, agent TEXT NOT NULL,
+    kind TEXT NOT NULL, tool TEXT, key TEXT, path TEXT, ok INTEGER, exit_code INTEGER, bytes INTEGER, body TEXT, turn INTEGER NOT NULL,
+    sandbox_bytes INTEGER NOT NULL DEFAULT 0, returned_bytes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, accessed_at INTEGER NOT NULL)`);
+  const ins = db.prepare('INSERT INTO events (session_id, worktree, agent, kind, tool, body, turn, sandbox_bytes, returned_bytes, created_at, accessed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+  const now = Date.now();
+  ins.run('cm-1', '/w', 'claude-code', 'cmd', 'ctx_execute', 'SEGREDO', 1, 40000, 1000, now, now);
+  ins.run('cm-1', '/w', 'claude-code', 'index', 'ctx_index', '', 2, 11577, 64, now, now);
+  ins.run('cm-1', '/w', 'claude-code', 'cmd', 'ctx_stats', '', 3, 9999, 9999, now, now);       // ctx_stats não conta
+  ins.run('cm-1', '/w', 'claude-code', 'cost', 'x', '', 4, 9999, 0, now, now);                // custo não conta
+  ins.run('old', '/w', 'claude-code', 'cmd', 'ctx_execute', '', 1, 5000, 500, now - 30 * 864e5, now);
+  db.close();
+  const { ctxStats } = require(path.join(ROOT, 'statusline.js'));
+  process.env.CONTEXT_MODE_DIR = dir;
+  const c = ctxStats('cm-1');
+  delete process.env.CONTEXT_MODE_DIR;
+  assert.deepStrictEqual(c.today, { produced: 51577, returned: 1064, calls: 2 });
+  assert.deepStrictEqual(c.all, { produced: 56577, returned: 1564, calls: 3 });
+  assert.strictEqual(c.session.calls, 2);
+
+  const cfg = path.join(dir, 'cfg.json');
+  fs.writeFileSync(cfg, JSON.stringify({ url: 'http://127.0.0.1:' + PORT, token: TOKEN }));
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'statusline.js')], { input: JSON.stringify({ session_id: 'cm-1' }), encoding: 'utf8', timeout: 5000,
+    env: Object.assign({}, process.env, { AGENTES_OFFICE_CONFIG: cfg, CONTEXT_MODE_DIR: dir, TMPDIR: dir, TEMP: dir, TMP: dir }) });
+  assert.strictEqual(r.status, 0);
+  await new Promise((res) => setTimeout(res, 300));
+  const cookie = await login();
+  const body = (await req('GET', '/state', { headers: { Cookie: cookie } })).body;
+  const u = JSON.parse(body).usage;
+  assert.strictEqual(u.context_mode.today.produced, 51577);
+  assert.strictEqual(u.context_mode.today.returned, 1064);
+  assert.strictEqual(u.context_mode.week.produced, 51577);
+  assert.doesNotMatch(body, /SEGREDO/);
+});
