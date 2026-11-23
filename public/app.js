@@ -945,6 +945,24 @@
           : `${lab}: nenhuma chamada do context-mode ainda`));
       }
       card.append(el('div', 'rc-empty', 'Tokens estimados a 4 bytes por token, como o próprio ctx_stats.'));
+      const short = (n) => { const m = /^mcp__(?:plugin_)?([^_]+(?:[-_][^_]+)*?)__(.+)$/.exec(n); return m ? (m[2].startsWith('ctx_') ? m[2] : m[2] + ' (' + m[1].replace(/_.*$/, '') + ')') : n; };
+      const line = (lab, sc) => `${lab} — ${sc.calls} chamadas · ${kb(sc.produced)} → ${kb(sc.returned)} · ${savedPct(sc).toString().replace('.', ',')}% fora`;
+      if (cm.tools && cm.tools.length) {
+        card.append(el('div', 'rc-sub', 'Por ferramenta (total, as que mais produzem)'));
+        for (const t of cm.tools) card.append(el('div', 'rc-row', line(short(t.name), t)));
+      }
+      const KIND = { index: 'Conteúdo indexado', edit: 'Edições de arquivo', toolerr: 'Erros guardados', decision: 'Suas decisões', cmd: 'Outras chamadas', prompt: 'Seus prompts' };
+      if (cm.kinds && cm.kinds.length) {
+        card.append(el('div', 'rc-sub', 'Por tipo de chamada'));
+        for (const k of cm.kinds) card.append(el('div', 'rc-row', line(KIND[k.name] || k.name, k)));
+      }
+      // dicas automáticas
+      const tips = [];
+      const leak = (cm.tools || []).filter((t) => t.produced > 50 * 1024 && savedPct(t) < 30).slice(0, 3);
+      for (const t of leak) tips.push(`${short(t.name)} devolve ${100 - Math.round(savedPct(t))}% do que produz para a conversa (${kb(t.returned)}). Peça resumos ou use ctx_execute/ctx_batch para saídas grandes dessa ferramenta.`);
+      const good = (cm.tools || []).filter((t) => t.produced > 50 * 1024 && savedPct(t) >= 80).slice(0, 2);
+      for (const t of good) tips.push(`${short(t.name)} está economizando bem (${Math.round(savedPct(t))}% fora): use mais para logs, listagens e páginas grandes.`);
+      if (tips.length) { card.append(el('div', 'rc-sub', 'Dicas')); for (const t of tips) card.append(el('div', 'rc-row', '• ' + t)); }
     }
     card.hidden = false;
   }

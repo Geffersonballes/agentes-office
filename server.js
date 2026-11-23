@@ -286,9 +286,12 @@ function sanitizeUsage(raw) {
   const scope = (o) => (o && typeof o === 'object' ? { produced: num(o.produced, 1e15) || 0, returned: num(o.returned, 1e15) || 0, calls: num(o.calls, 1e9) || 0 } : null);
   const cm = raw.context_mode && typeof raw.context_mode === 'object' ? raw.context_mode : null;
   const machine = typeof raw.machine === 'string' && /^[a-f0-9]{6,32}$/.test(raw.machine) ? raw.machine : null;
+  const list = (arr, max, re) => (Array.isArray(arr) ? arr.slice(0, max).filter((x) => x && typeof x.name === 'string' && re.test(x.name))
+    .map((x) => Object.assign({ name: x.name }, scope(x))) : []);
   return { session_id: sid, input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
     cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day),
-    ctx: cm && machine ? { machine, all: scope(cm.all), today: scope(cm.today), week: scope(cm.week), session: scope(cm.session) } : null };
+    ctx: cm && machine ? { machine, all: scope(cm.all), today: scope(cm.today), week: scope(cm.week), session: scope(cm.session),
+      tools: list(cm.tools, 15, /^[A-Za-z0-9_.:\-]{1,80}$/), kinds: list(cm.kinds, 8, /^(prompt|edit|cmd|toolerr|index|decision|\?)$/) } : null };
 }
 function applyUsage(u) {
   const now = Date.now(), day = dayKey(now), week = weekKey(now);
@@ -322,14 +325,18 @@ function usageSummary() {
   // economia do context-mode: soma das máquinas (cada uma manda os totais do próprio disco)
   if (usage.ctx.size) {
     const z = () => ({ produced: 0, returned: 0, calls: 0 });
-    const c = { all: z(), today: z(), week: z(), machines: usage.ctx.size, updated: 0 };
+    const c = { all: z(), today: z(), week: z(), machines: usage.ctx.size, updated: 0, tools: [], kinds: [] };
+    const merge = (dst, arr) => { for (const x of arr || []) { const d = dst.find((y) => y.name === x.name); if (d) { d.produced += x.produced; d.returned += x.returned; d.calls += x.calls; } else dst.push(Object.assign({}, x)); } };
     for (const m of usage.ctx.values()) {
+      merge(c.tools, m.tools); merge(c.kinds, m.kinds);
       const add = (k, src) => { if (src) { c[k].produced += src.produced; c[k].returned += src.returned; c[k].calls += src.calls; } };
       add('all', m.all);
       if (m.dayKey === day) add('today', m.today);
       if (m.weekKey === week) add('week', m.week);
       c.updated = Math.max(c.updated, m.t);
     }
+    c.tools.sort((x, y) => y.produced - x.produced); c.tools = c.tools.slice(0, 15);
+    c.kinds.sort((x, y) => y.produced - x.produced);
     out.context_mode = c;
   }
   out.updated = usage.updated || null;

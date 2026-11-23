@@ -72,7 +72,7 @@ function ctxStats(sessionId) {
   const weekStart = dayStart - dow * DAY_MS;
   const CALLS = "tool IS NOT NULL AND kind <> 'cost' AND tool <> 'ctx_stats'";
   const z = () => ({ produced: 0, returned: 0, calls: 0 });
-  const out = { all: z(), today: z(), week: z(), session: z() };
+  const out = { all: z(), today: z(), week: z(), session: z(), tools: {}, kinds: {} };
   for (const f of dbs) {
     let db;
     try {
@@ -83,10 +83,23 @@ function ctxStats(sessionId) {
       add('today', q(' AND created_at >= ?', dayStart));
       add('week', q(' AND created_at >= ?', weekStart));
       if (sessionId) add('session', q(' AND session_id = ?', String(sessionId)));
+      // detalhamento (total): por ferramenta e por tipo de chamada — só nomes e números
+      for (const [col, bucket] of [['tool', out.tools], ['kind', out.kinds]]) {
+        const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS calls, COALESCE(SUM(sandbox_bytes),0) AS produced, COALESCE(SUM(returned_bytes),0) AS returned FROM events WHERE ${CALLS} GROUP BY ${col}`).all();
+        for (const r of rows) {
+          const k = String(r.k || '?').slice(0, 80);
+          const b = bucket[k] || (bucket[k] = z());
+          b.produced += Number(r.produced) || 0; b.returned += Number(r.returned) || 0; b.calls += Number(r.calls) || 0;
+        }
+      }
     } catch { /* banco em uso, outra versão ou corrompido: pula */ }
     finally { try { if (db) db.close(); } catch { /* nada */ } }
   }
-  return out.all.calls ? out : undefined;
+  if (!out.all.calls) return undefined;
+  const top = (b, n) => Object.keys(b).map((k) => Object.assign({ name: k }, b[k])).sort((x, y) => y.produced - x.produced || y.calls - x.calls).slice(0, n);
+  out.tools = top(out.tools, 15);
+  out.kinds = top(out.kinds, 8);
+  return out;
 }
 
 function shouldSend(p) {

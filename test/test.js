@@ -352,5 +352,9 @@ test('context-mode: lê a economia do context.db e mostra no painel', async () =
   assert.strictEqual(u.context_mode.today.produced, 51577);
   assert.strictEqual(u.context_mode.today.returned, 1064);
   assert.strictEqual(u.context_mode.week.produced, 51577);
+  const ex = u.context_mode.tools.find((t) => t.name === 'ctx_execute');
+  assert.deepStrictEqual([ex.produced, ex.returned, ex.calls], [45000, 1500, 2]);
+  assert.ok(!u.context_mode.tools.find((t) => t.name === 'ctx_stats'));
+  assert.ok(u.context_mode.kinds.find((k) => k.name === 'index'));
   assert.doesNotMatch(body, /SEGREDO/);
 });
