@@ -387,6 +387,19 @@ function later(key, ms, fn) {
   t.unref(); timers.set(key, t);
 }
 
+// Subagentes costumam durar poucos segundos: ficam no mínimo SUB_MIN_MS na tela e,
+// depois de concluídos, mais SUB_KEEP_MS comemorando antes de sumir.
+const SUB_MIN_MS = 15e3, SUB_KEEP_MS = 60e3;
+function finishSub(main, id) {
+  const s = agents.get(id);
+  main.subs.delete(id);
+  if (!s || s.done) return;
+  s.done = true;
+  const wait = Math.max(0, SUB_MIN_MS - (Date.now() - (s.created || 0)));
+  const done = () => { if (agents.get(id) === s) setStatus(s, 'concluido'); later('sub:' + id, SUB_KEEP_MS, () => { if (agents.get(id) === s) agents.delete(id); }); };
+  if (wait) later('subfim:' + id, wait, done); else done();
+}
+
 /** Aplica um evento (já validado e reduzido) ao estado. */
 function applyEvent(ev) {
   const sid = ev.session_id;
@@ -419,6 +432,7 @@ function applyEvent(ev) {
     case 'PostToolUseFailure': {
       clearTimeout(timers.get('idle:' + sid));
       if (stale && target === main) break;
+      if (target.done) break; // subagente já terminou: fica comemorando até sumir
       const isTask = ev.tool_name === 'Task' || ev.tool_name === 'Agent';
       target.tool = ev.tool_name || target.tool;
       const st = target === main && (isTask || main.subs.size) ? 'delegando' : 'trabalhando';
@@ -431,7 +445,7 @@ function applyEvent(ev) {
       let s = agents.get(subId);
       if (!s) {
         s = { id: subId, tag: '#' + ev.agent_id.replace(/[^A-Za-z0-9]/g, '').slice(0, 4), agentType: ev.agent_type || '', kind: 'sub', parent: sid,
-          status: 'trabalhando', room: 'Entrada', since: Date.now(), updated: Date.now(), ts: 0 };
+          status: 'trabalhando', room: 'Entrada', since: Date.now(), created: Date.now(), updated: Date.now(), ts: 0 };
         agents.set(subId, s);
       }
       main.subs.add(subId);
@@ -440,16 +454,9 @@ function applyEvent(ev) {
       break;
     }
     case 'SubagentStop': {
-      const s = subId && agents.get(subId);
-      if (s) {
-        setStatus(s, 'concluido');
-        main.subs.delete(subId);
-        later('sub:' + subId, 6000, () => agents.delete(subId));
-      } else if (!subId) {
-        // versões antigas do Claude Code não mandam agent_id: encerra o subagente mais antigo
-        const first = [...main.subs][0];
-        if (first && agents.get(first)) { setStatus(agents.get(first), 'concluido'); main.subs.delete(first); later('sub:' + first, 6000, () => agents.delete(first)); }
-      }
+      const id = subId && agents.has(subId) ? subId : (!subId ? [...main.subs][0] : null);
+      // versões antigas do Claude Code não mandam agent_id: encerra o subagente mais antigo
+      if (id && agents.get(id)) finishSub(main, id);
       if (!main.subs.size && main.status === 'delegando') setStatus(main, 'trabalhando');
       break;
     }
