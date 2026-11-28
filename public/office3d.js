@@ -394,28 +394,49 @@
     B(world, edge, -1.15, -0.05, -1.25, -1.05, 0.12, 14.35); B(world, edge, 24.95, -0.05, -1.25, 25.05, 0.12, 14.35);
 
     var ACCENT = ['#8957e5', '#39c5cf', '#4f8cff', '#56d364', '#ff7b72', '#d29922', '#e3b341', '#f778ba', '#db61a2', '#3fb950', '#79c0ff', '#a371f7', '#2ea043', '#f0883e', '#8b949e'];
+    // cor de cada sala: parede do fundo em destaque, paredes em tom claro, piso tingido, cadeiras e divisórias na cor da sala
+    var ROOM_COLOR = {
+      'CEO IA': '#7c4dff', 'Operações': '#00acc1', 'Tecnologia': '#2f6fec', 'Produto': '#2fa65a', 'Aquisição': '#f4511e',
+      'Vendas': '#f2a900', 'Follow-up / CRM': '#e0a800', 'Copy': '#e83e8c', 'Landing Pages': '#c2185b', 'Tráfego': '#43a047',
+      'Pós-venda': '#1e88e5', 'Curso IA Professores': '#8e5ce6', 'Sua mesa / Aprovações': '#fb8c00', 'Sala de Jogos': '#ff7043', 'Entrada': '#26a69a',
+    };
+    function mix(a, b, k) { return '#' + new T.Color(a).lerp(new T.Color(b), k).getHexString(); }
+    function paletteOf(name, i) {
+      var c = ROOM_COLOR[name] || ACCENT[i % ACCENT.length];
+      return { accent: c, wall: mix(c, '#ffffff', 0.8), feature: mix(c, '#ffffff', 0.42), tile: mix(c, '#ffffff', 0.86),
+        carpet: mix(c, '#ffffff', 0.35), wood: mix(c, '#ffffff', 0.82), chair: mix(c, '#101418', 0.4), partition: mix(c, '#9aa3ad', 0.62) };
+    }
     var FLOOR = { 'CEO IA': 'carpet', 'Copy': 'carpet', 'Curso IA Professores': 'carpet', 'Pós-venda': 'carpet', 'Sala de Jogos': 'wood', 'Entrada': 'wood' };
     var rooms = [];      // por sala: { g, floorMat, wallMat, anim: [] }
     var skyGlass = new T.MeshBasicMaterial({ color: '#a9d3f5', transparent: true, opacity: 0.85 });
     var WALL_H = 1.3, WT = 0.08;
 
-    function buildRooms() {
+    function buildRooms(list) {
+      if (Array.isArray(list) && list.length) cfg.ROOMS = list.slice();
       for (var r = 0; r < rooms.length; r++) world.remove(rooms[r].g);
       rooms = []; monitors = [];
       cfg.ROOMS.forEach(function (name, i) {
         var og = cfg.roomOrigin(i);
         var g = new T.Group(); g.position.set(og.gx, 0, og.gy); world.add(g);
-        var accent = ACCENT[i % ACCENT.length];
+        var pal = paletteOf(name, i), accent = pal.accent;
         var kind = FLOOR[name] || 'tile';
         var tex = TEX[kind].clone(); tex.needsUpdate = true; tex.repeat.set(kind === 'tile' ? 3.5 : 2, kind === 'tile' ? 3.5 : 2);
-        var floorMat = new T.MeshLambertMaterial({ map: tex, color: '#ffffff', emissive: '#000000' });
+        var floorBase = new T.Color(pal[kind]);
+        var floorMat = new T.MeshLambertMaterial({ map: tex, color: floorBase.clone(), emissive: '#000000' });
         var floor = new T.Mesh(new T.PlaneGeometry(S, S), floorMat);
         floor.rotation.x = -Math.PI / 2; floor.position.set(S / 2, 0.005, S / 2); floor.receiveShadow = shadows; g.add(floor);
-        var wallMat = new T.MeshLambertMaterial({ color: COL.wall, emissive: '#000000' });
-        var stripe = M(accent), base = M(COL.base);
-        // parede do fundo (norte) e da esquerda (oeste): altas
-        B(g, wallMat, -WT, 0, -WT, S + WT, WALL_H, 0);
-        B(g, wallMat, -WT, 0, 0, 0, WALL_H, S + WT);
+        var wallBase = new T.Color(pal.wall), featBase = new T.Color(pal.feature);
+        var wallMat = new T.MeshLambertMaterial({ color: wallBase.clone(), emissive: '#000000' });
+        var featMat = new T.MeshLambertMaterial({ color: featBase.clone(), emissive: '#000000' });
+        var stripe = M(accent), base = M(mix(accent, '#000000', 0.35));
+        var lounge = name === 'Entrada' && loungeSide(i) === 'oeste';
+        // parede do fundo (norte, cor de destaque) e da esquerda (oeste): altas
+        B(g, featMat, -WT, 0, -WT, S + WT, WALL_H, 0);
+        if (lounge) {   // passagem para a Sala de Jogos
+          B(g, wallMat, -WT, 0, 0, 0, WALL_H, 1.35); B(g, wallMat, -WT, 0, 2.15, 0, WALL_H, S + WT);
+          B(g, wallMat, -WT, 0.95, 1.35, 0, WALL_H, 2.15);
+          B(g, M(mix(accent, '#000000', 0.3)), -WT - 0.01, 0.92, 1.33, 0.01, 0.97, 2.17, true);
+        } else B(g, wallMat, -WT, 0, 0, 0, WALL_H, S + WT);
         B(g, M(COL.wallDark), -WT, WALL_H, -WT, S + WT, WALL_H + 0.03, 0, true); B(g, M(COL.wallDark), -WT, WALL_H, 0, 0, WALL_H + 0.03, S + WT, true);
         // faixas (como na referência) e rodapé
         [0.34, 0.39].forEach(function (y) { B(g, stripe, 0, y, 0, S, y + 0.022, 0.01, true); B(g, stripe, 0, y, 0, 0.01, y + 0.022, S, true); });
@@ -427,25 +448,63 @@
         B(g, M(COL.wallDark), 0, low, S, S + WT, low + 0.02, S + WT, true);
         B(g, M(COL.wallDark), S, low, 0, S + WT, low + 0.02, 1.35, true); B(g, M(COL.wallDark), S, low, 2.15, S + WT, low + 0.02, S, true);
         B(g, M('#3b3f46'), S - 0.25, 0.004, 1.4, S + 0.3, 0.012, 2.1, true);    // capacho
-        // janelas na parede oeste
+        // janelas na parede oeste (a Sala de Espera tem a passagem no lugar)
+        if (!lounge) {
         B(g, M(COL.glassFrame), 0.005, 0.66, 0.28, 0.03, 1.2, 2.12, true);
         var glass = new T.Mesh(new T.PlaneGeometry(1.8, 0.48), skyGlass); glass.rotation.y = Math.PI / 2; glass.position.set(0.035, 0.93, 1.2); g.add(glass);
         for (var mz = 0; mz <= 3; mz++) B(g, M(COL.glassFrame), 0.03, 0.66, 0.29 + mz * 0.6 - 0.015, 0.05, 1.2, 0.29 + mz * 0.6 + 0.015, true);
         B(g, M(COL.glassFrame), 0.03, 0.92, 0.28, 0.05, 0.94, 2.12, true);
         B(g, M('#c9ccd0'), 0.03, 0.64, 0.26, 0.09, 0.66, 2.14, true);          // peitoril
+        }
         // placa com o nome da sala na parede do fundo
         var sign = planeTex(g, signTex(cfg.dispName(name), accent), 1.7, 0.32, S / 2, 1.1, 0.012, 0, true);
-        var R = { g: g, floorMat: floorMat, wallMat: wallMat, anim: [], name: name, i: i, sign: sign };
+        var R = { g: g, floorMat: floorMat, wallMat: wallMat, featMat: featMat, floorBase: floorBase, wallBase: wallBase, featBase: featBase,
+          anim: [], name: name, i: i, sign: sign, pal: pal };
         rooms.push(R);
         furnish(R, name, i, accent);
       });
+      buildLounge();
+    }
+    // A Sala de Jogos fica colada na Sala de Espera: corredor coberto entre as duas portas
+    function loungeSide(i) {
+      var j = cfg.ROOMS.indexOf('Sala de Jogos'); if (j < 0) return null;
+      var a = cfg.roomOrigin(i), b = cfg.roomOrigin(j);
+      if (a.gy !== b.gy) return null;
+      if (b.gx === a.gx - 5) return 'oeste';
+      return null;
+    }
+    var loungeG = null;
+    function buildLounge() {
+      if (loungeG) { world.remove(loungeG); loungeG = null; }
+      var ie = cfg.ROOMS.indexOf('Entrada');
+      if (ie < 0 || loungeSide(ie) !== 'oeste') return;
+      var o = cfg.roomOrigin(ie);
+      loungeG = new T.Group(); world.add(loungeG);
+      var x0 = o.gx - 5 + S + WT, x1 = o.gx - WT, z0 = o.gy + 1.35, z1 = o.gy + 2.15;
+      var tex = TEX.wood.clone(); tex.needsUpdate = true; tex.repeat.set(1, 0.5);
+      var fl = new T.Mesh(new T.PlaneGeometry(x1 - x0 + 0.2, z1 - z0), new T.MeshLambertMaterial({ map: tex, color: '#ffe0b2' }));
+      fl.rotation.x = -Math.PI / 2; fl.position.set((x0 + x1) / 2, 0.006, (z0 + z1) / 2); fl.receiveShadow = shadows; loungeG.add(fl);
+      var wm = M('#fff3e0'), glassM = new T.MeshLambertMaterial({ color: '#bfe3ff', transparent: true, opacity: 0.45 });
+      // paredes de vidro baixas dos dois lados, com faixa colorida
+      [z0 - 0.04, z1].forEach(function (z) {
+        B(loungeG, wm, x0, 0, z, x1, 0.25, z + 0.04);
+        var g2 = new T.Mesh(UNIT, glassM); g2.scale.set(x1 - x0, 0.6, 0.02); g2.position.set((x0 + x1) / 2, 0.55, z + 0.02); loungeG.add(g2);
+        B(loungeG, M('#ff7043'), x0, 0.85, z, x1, 0.9, z + 0.04, true);
+      });
+      // placa "Lounge" no alto
+      var sg = planeTex(loungeG, signTex('Lounge', '#ff7043'), 1.2, 0.22, (x0 + x1) / 2, 1.05, z0 - 0.02, 0, true);
+      sg.rotation.y = 0;
+      var sg2 = planeTex(loungeG, signTex('Lounge', '#ff7043'), 1.2, 0.22, (x0 + x1) / 2, 1.05, z1 + 0.06, Math.PI, true);
+      void sg2;
+      B(loungeG, M('#5d4037'), x0, 0.95, z0 - 0.05, x0 + 0.04, 1.18, z1 + 0.05, true); B(loungeG, M('#5d4037'), x1 - 0.04, 0.95, z0 - 0.05, x1, 1.18, z1 + 0.05, true);
+      B(loungeG, M('#5d4037'), x0, 1.16, z0 - 0.05, x1, 1.2, z0, true); B(loungeG, M('#5d4037'), x0, 1.16, z1, x1, 1.2, z1 + 0.05, true);
     }
 
     function workstations(R, i) {
       var g = R.g;
       cfg.WORKSTATIONS.forEach(function (w, k) {
         var x0 = w.desk[0], x1 = w.desk[0] + w.desk[2], z0 = w.desk[1], z1 = w.desk[1] + 0.6, cx = (x0 + x1) / 2;
-        var top = M(COL.deskTop), metal = M(COL.metal), part = M(COL.partition), trim = M(COL.partTrim);
+        var top = M(COL.deskTop), metal = M(COL.metal), part = M(R.pal.partition), trim = M(mix(R.pal.accent, '#000000', 0.25));
         B(g, top, x0, 0.36, z0, x1, 0.39, z1);
         B(g, metal, x0 + 0.03, 0, z0 + 0.05, x0 + 0.06, 0.36, z1 - 0.05); B(g, metal, x1 - 0.06, 0, z0 + 0.05, x1 - 0.03, 0.36, z1 - 0.05);
         B(g, metal, x0 + 0.03, 0.0, z0 + 0.25, x1 - 0.03, 0.03, z0 + 0.3);
@@ -464,7 +523,7 @@
         if (k === 0) { C(g, M('#ffffff'), 0.025, 0.022, 0.06, x0 + 0.12, 0.39, z0 + 0.42, 10); B(g, M('#f7f2d0'), x0 + 0.2, 0.39, z0 + 0.15, x0 + 0.34, 0.395, z0 + 0.26, true); }
         if (k === 2) place(g, makePlant(0.45), x0 + 0.1, z0 + 0.12, 0, 0.39);
         // cadeira (a pessoa senta de frente para o monitor)
-        place(g, makeChair(), cx, z1 + 0.3, 0);
+        place(g, makeChair(R.pal.chair), cx, z1 + 0.3, 0);
       });
     }
 
@@ -528,9 +587,10 @@
         case 'Entrada': {
           // Sala de Espera: cadeiras na parede oeste, mesa de xadrez e de cartas (casam com WAIT_SLOTS)
           place(g, makeDoor(0.7, 0.85, '#1b2a3a'), 1.75, 0.012, 0);
-          cfg.WAIT_SLOTS.forEach(function (s) {
+          var CH = ['#e53935', '#1e88e5', '#43a047', '#fbc02d', '#8e24aa', '#00897b', '#f4511e'];
+          cfg.WAIT_SLOTS.forEach(function (s, k) {
             var f = focusFor('Entrada', s), dx = f[0] - s.p[0], dz = f[1] - s.p[1];
-            place(g, makeChair('#3a4f6e'), s.p[0], s.p[1], Math.atan2(-dx, -dz));
+            place(g, makeChair(CH[k % CH.length]), s.p[0], s.p[1], Math.atan2(-dx, -dz));
           });
           var chess = place(g, makeTable(0.2, 0.3, '#f4f5f6', false), 1.6, 2.37);
           var board = new T.Mesh(new T.PlaneGeometry(0.22, 0.22), new T.MeshLambertMaterial({ map: canvasTex(64, 64, function (c) { for (var a = 0; a < 8; a++) for (var b = 0; b < 8; b++) { c.fillStyle = (a + b) % 2 ? '#3b2a1a' : '#f1e3c6'; c.fillRect(a * 8, b * 8, 8, 8); } }) }));
@@ -548,6 +608,7 @@
     // para onde olha quem está numa vaga de lazer
     var FOCUS = { play: [1.15, 2.5], videogame: [2.48, 0.0], darts: [1.15, 0.0], coffee: [2.75, 3.6], chess: [1.6, 2.37], cards: [2.8, 2.02] };
     function focusFor(room, slot) {
+      if (slot.face) return [slot.p[0] + slot.face[0], slot.p[1] + slot.face[1]];
       var f = FOCUS[slot.pose];
       if (f) return f;
       return [slot.p[0] + 1, slot.p[1]];      // celular/revista: olha para dentro da sala
@@ -895,11 +956,12 @@
         var L = st.light[i];
         var lit = st.litRooms.has(i), hot = i === st.hotIdx;
         var b = 0.62 + 0.38 * Math.min(1, Math.max(0, (L - 0.78) / 0.3));
-        R.floorMat.color.setScalar(b);
-        R.wallMat.color.set(COL.wall).multiplyScalar(0.8 + 0.2 * b);
+        R.floorMat.color.copy(R.floorBase).multiplyScalar(b);
+        R.wallMat.color.copy(R.wallBase).multiplyScalar(0.8 + 0.2 * b);
+        R.featMat.color.copy(R.featBase).multiplyScalar(0.8 + 0.2 * b);
         var em = hot ? 0.18 + 0.12 * Math.sin(t * 6) : (L > 0.9 ? 0.34 * night : 0.04 * night);
         R.floorMat.emissive.setRGB(em * (hot ? 1 : 1), em * (hot ? 0.45 : 0.85), em * (hot ? 0.1 : 0.55));
-        R.wallMat.emissive.setRGB(em * 0.6, em * 0.5, em * 0.35);
+        R.wallMat.emissive.setRGB(em * 0.6, em * 0.5, em * 0.35); R.featMat.emissive.copy(R.wallMat.emissive);
         var rst = { lit: lit, waiting: st.waiting && hot, playing: playing };
         for (var a = 0; a < R.anim.length; a++) R.anim[a](t, rst);
       });
@@ -983,7 +1045,7 @@
         var a = s.data;
         var L = links.get(id);
         var par = a && a.parent && people.get(a.parent), me = people.get(id);
-        var on = !!(par && me && !s.leaving && a.status !== 'concluido');
+        var on = !!(par && me && !s.leaving && (a.status === 'trabalhando' || a.status === 'delegando' || a.status === 'aguardando'));
         if (!on) { if (L) { L.line.visible = false; L.dot.visible = false; } return; }
         if (!L) {
           var geo = new T.BufferGeometry(); geo.setAttribute('position', new T.Float32BufferAttribute(new Float32Array(17 * 3), 3));

@@ -167,7 +167,7 @@ function readBody(req, limit) {
 const ROOMS = [
   'CEO IA', 'Operações', 'Tecnologia', 'Produto', 'Aquisição',
   'Vendas', 'Follow-up / CRM', 'Copy', 'Landing Pages', 'Tráfego',
-  'Pós-venda', 'Curso IA Professores', 'Sala de Jogos', 'Sua mesa / Aprovações', 'Entrada',
+  'Pós-venda', 'Curso IA Professores', 'Sua mesa / Aprovações', 'Sala de Jogos', 'Entrada',   // Jogos colada na Sala de Espera
 ];
 const DEFAULT_RULES = {
   'CEO IA': ['estrategia', 'estratégia', 'planejamento', 'decisao', 'decisão', 'meta', 'okr'],
@@ -398,14 +398,27 @@ function later(key, ms, fn) {
 
 // Subagentes costumam durar poucos segundos: ficam no mínimo SUB_MIN_MS na tela e,
 // depois de concluídos, mais SUB_KEEP_MS comemorando antes de sumir.
-const SUB_MIN_MS = 15e3, SUB_KEEP_MS = 60e3;
+const SUB_MIN_MS = 15e3, SUB_KEEP_MS = 30e3;
+// Quantos agentes livres ficam na Sala de Espera / Sala de Jogos (as vagas das duas salas); os mais antigos saem
+const MAX_IDLE = 16;
+function pruneIdle() {
+  const idle = [...agents.values()].filter((a) => a.status === 'ocioso' && !(a.subs && a.subs.size)).sort((x, y) => y.updated - x.updated);
+  for (const a of idle.slice(MAX_IDLE)) {
+    agents.delete(a.id);
+    const m = a.parent && agents.get(a.parent); if (m && m.subs) m.subs.delete(a.id);
+  }
+}
 function finishSub(main, id) {
   const s = agents.get(id);
   main.subs.delete(id);
   if (!s || s.done) return;
   s.done = true;
   const wait = Math.max(0, SUB_MIN_MS - (Date.now() - (s.created || 0)));
-  const done = () => { if (agents.get(id) === s) setStatus(s, 'concluido'); later('sub:' + id, SUB_KEEP_MS, () => { if (agents.get(id) === s) agents.delete(id); }); };
+  const done = () => {
+    if (agents.get(id) === s) setStatus(s, 'concluido');
+    // depois de comemorar, o subagente vai para a Sala de Espera (não some)
+    later('sub:' + id, SUB_KEEP_MS, () => { if (agents.get(id) === s && s.done) { setStatus(s, 'ocioso', 'Entrada'); s.tool = null; pruneIdle(); } });
+  };
   if (wait) later('subfim:' + id, wait, done); else done();
 }
 
@@ -427,9 +440,10 @@ function applyEvent(ev) {
       break;
     case 'SessionEnd':
       setStatus(main, 'concluido');
-      later('end:' + sid, 5000, () => {
-        for (const s of main.subs) agents.delete(s);
-        agents.delete(sid);
+      // ninguém some: depois de comemorar, vai para a Sala de Espera e fica lá esperando
+      later('end:' + sid, 8000, () => {
+        for (const s of [...main.subs]) finishSub(main, s);
+        if (agents.get(sid) === main && main.status === 'concluido') { setStatus(main, 'ocioso', 'Entrada'); main.tool = null; pruneIdle(); }
       });
       break;
     case 'UserPromptSubmit':
@@ -464,6 +478,7 @@ function applyEvent(ev) {
           status: 'trabalhando', room: 'Entrada', since: Date.now(), created: Date.now(), updated: Date.now(), ts: 0 };
         agents.set(subId, s);
       }
+      s.done = false; clearTimeout(timers.get('sub:' + subId)); clearTimeout(timers.get('subfim:' + subId));
       main.subs.add(subId);
       if (main.topic) s.topic = main.topic;          // o subagente trabalha no mesmo assunto do chefe
       setStatus(s, 'trabalhando', s.topic || pickRoom(roomHint, 'Produto'));
@@ -487,7 +502,7 @@ function applyEvent(ev) {
     case 'Stop':
       if (stale) break;
       setStatus(main, main.subs.size ? 'delegando' : 'concluido');
-      later('idle:' + sid, 90e3, () => { if (agents.get(sid) && main.status === 'concluido') setStatus(main, 'ocioso', 'Entrada'); });
+      later('idle:' + sid, 45e3, () => { if (agents.get(sid) && main.status === 'concluido') { setStatus(main, 'ocioso', 'Entrada'); main.tool = null; pruneIdle(); } });
       break;
     default:
       break;
@@ -501,7 +516,12 @@ function applyEvent(ev) {
 // limpeza de agentes esquecidos (sessão fechada sem SessionEnd)
 setInterval(() => {
   const now = Date.now();
-  for (const [id, a] of agents) if (now - a.updated > 45 * 60e3) { agents.delete(id); }
+  for (const [id, a] of agents) {
+    // sessão fechada sem aviso: depois de 45 min parado, o agente vai para a Sala de Espera; livres ficam até 24 h
+    if (a.status !== 'ocioso' && now - a.updated > 45 * 60e3) { setStatus(a, 'ocioso', 'Entrada'); a.tool = null; if (a.subs) a.subs.clear(); }
+    else if (a.status === 'ocioso' && now - a.updated > 24 * 3600e3) agents.delete(id);
+  }
+  pruneIdle();
   scheduleAgents();
 }, 60e3).unref();
 

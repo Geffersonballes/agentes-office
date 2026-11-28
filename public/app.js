@@ -18,7 +18,7 @@
   const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let ROOMS = ['CEO IA', 'Operações', 'Tecnologia', 'Produto', 'Aquisição', 'Vendas', 'Follow-up / CRM', 'Copy',
-    'Landing Pages', 'Tráfego', 'Pós-venda', 'Curso IA Professores', 'Sala de Jogos', 'Sua mesa / Aprovações', 'Entrada'];
+    'Landing Pages', 'Tráfego', 'Pós-venda', 'Curso IA Professores', 'Sua mesa / Aprovações', 'Sala de Jogos', 'Entrada'];
   const TINT = ['#3b2f5c', '#24384f', '#1f3d5a', '#2c3f35', '#3d3524', '#3a2a2a', '#2a3a3a', '#3a2f40', '#2f3446',
     '#3a3324', '#283a2e', '#33304a', '#2c3a24', '#4a3320', '#2a2f38'];
   const STAT = {
@@ -382,7 +382,12 @@
         wallY(gx, gy, 1.2, 2.4, 14, 26, shade('#30363d', Math.max(f, 0.8)));
         wallY(gx, gy, 1.35, 2.25, 16, 24, shade('#388bfd', Math.max(f, 0.8)));
         // cadeiras encostadas na parede da esquerda
-        for (const y of [0.7, 1.3, 1.9, 2.5, 3.1]) { box(gx + 0.12, gy + y - 0.2, 0.42, 0.4, 5, '#3d444d', 0, f); box(gx + 0.05, gy + y - 0.2, 0.12, 0.4, 12, '#3d444d', 0, f); }
+        for (const sl of WAIT_SLOTS) {
+          if (sl.pose !== 'phone' && sl.pose !== 'magazine') continue;
+          const [x, y] = sl.p;
+          if (sl.face) { box(gx + x - 0.2, gy + y - 0.25, 0.4, 0.42, 5, '#3d444d', 0, f); box(gx + x - 0.2, gy + y - 0.35, 0.4, 0.12, 12, '#3d444d', 0, f); }
+          else { box(gx + 0.12, gy + y - 0.2, 0.42, 0.4, 5, '#3d444d', 0, f); box(gx + 0.05, gy + y - 0.2, 0.12, 0.4, 12, '#3d444d', 0, f); }
+        }
         // mesa de xadrez
         stool(gx + 1.6, gy + 1.8, f); stool(gx + 1.6, gy + 2.95, f);
         box(gx + 1.3, gy + 2.1, 0.6, 0.6, 7, '#6e4b2a', 0, f);
@@ -460,8 +465,9 @@
   const WAIT_SLOTS = [
     { p: [1.6, 1.8], pose: 'chess', dir: 1 }, { p: [1.6, 2.95], pose: 'chess', dir: -1, away: true },
     { p: [2.8, 1.45], pose: 'cards', dir: 1 }, { p: [2.8, 2.6], pose: 'cards', dir: -1, away: true },
-    { p: [0.38, 0.7], pose: 'phone', dir: 1 }, { p: [0.38, 1.3], pose: 'magazine', dir: 1 }, { p: [0.38, 1.9], pose: 'phone', dir: 1 },
-    { p: [0.38, 2.5], pose: 'magazine', dir: 1 }, { p: [0.38, 3.1], pose: 'phone', dir: 1 },
+    // cadeiras: parede oeste (a passagem para a Sala de Jogos fica no meio dela) e parede do fundo
+    { p: [0.38, 0.7], pose: 'phone', dir: 1 }, { p: [0.38, 2.75], pose: 'magazine', dir: 1 }, { p: [0.38, 3.25], pose: 'phone', dir: 1 },
+    { p: [2.6, 0.45], pose: 'magazine', dir: -1, face: [0, 1] }, { p: [3.1, 0.45], pose: 'phone', dir: -1, face: [0, 1] },
   ];
   // Pré-visualização opcional pela URL: ?pausa=10 (segundos até ir para a Sala de Jogos) e ?hora=23 (hora local, UTC-4)
   const QS = new URLSearchParams(location.search);
@@ -503,9 +509,21 @@
     for (let i = 0; i < ROOMS.length; i++) { const o = roomOrigin(i); if (x >= o.gx - 0.05 && x <= o.gx + S + 0.05 && y >= o.gy - 0.05 && y <= o.gy + S + 0.05) return i; }
     return -1;
   }
+  // Sala de Jogos e Sala de Espera, lado a lado, têm uma passagem direta entre elas
+  function lounge(A, B) {
+    if (A < 0 || B < 0) return null;
+    const names = [ROOMS[A], ROOMS[B]];
+    if (names.indexOf('Sala de Jogos') < 0 || names.indexOf('Entrada') < 0) return null;
+    const oa = roomOrigin(A), ob = roomOrigin(B);
+    if (oa.gy !== ob.gy || Math.abs(oa.gx - ob.gx) !== 5) return null;
+    const y = oa.gy + 1.75;
+    return oa.gx < ob.gx ? [[oa.gx + S - 0.3, y], [ob.gx + 0.3, y]] : [[oa.gx + 0.3, y], [ob.gx + S - 0.3, y]];
+  }
   function route(fx, fy, tx, ty) {
     const A = roomAtPoint(fx, fy), B = roomAtPoint(tx, ty);
     if (A === B && A >= 0) return [[tx, ty]];
+    const lg = lounge(A, B);
+    if (lg) return lg.concat([[tx, ty]]);
     const pts = [];
     let vx;
     if (A >= 0) { const o = roomOrigin(A); pts.push([o.gx + S - 0.3, o.gy + 1.75], [o.gx + 4.25, o.gy + 1.75]); vx = o.gx + 4.25; }
@@ -1021,10 +1039,13 @@
   const elLog = document.getElementById('log');
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
+  const ORDER = { aguardando: 0, trabalhando: 1, delegando: 1, concluido: 2, ocioso: 3 };
   function renderAgents() {
     elAgents.replaceChildren();
     if (!agentList.length) { elAgents.append(el('div', 'empty', 'Nenhum agente ativo.')); return; }
-    for (const a of agentList) {
+    // quem está trabalhando primeiro; os livres (Sala de Espera / Jogos) no fim
+    const list = agentList.slice().sort((x, y) => (ORDER[x.status] - ORDER[y.status]) || (y.updated || 0) - (x.updated || 0));
+    for (const a of list) {
       const [c, label] = STAT[a.status] || STAT.ocioso;
       const row = el('div', 'ag' + (a.status === 'aguardando' ? ' wait' : ''));
       const dot = el('div', 'dot'); dot.style.background = (sprites.get(a.id) || {}).shirt || c;
@@ -1053,7 +1074,11 @@
   function setLive(state, text) { live.className = state; live.querySelector('span').textContent = text; }
 
   function applyState(s) {
-    if (Array.isArray(s.rooms) && s.rooms.length) ROOMS = s.rooms;
+    if (Array.isArray(s.rooms) && s.rooms.length) {
+      const changed = s.rooms.join('|') !== ROOMS.join('|');
+      ROOMS = s.rooms;
+      if (changed && O3) { lastRooms = ROOMS.join('|'); O3.rebuild(ROOMS); }
+    }
     document.getElementById('foot').textContent = 'Modo de detalhe: ' + (s.detail === 'normal' ? 'normal (mostra detalhes curtos)' : 'mínimo (só ferramenta e tipo de evento)');
     elLog.replaceChildren(); s.log.forEach(addLog);
     USAGE = s.usage || null;
@@ -1166,7 +1191,7 @@
   const is3D = start3D();
   if (modeBtn) { modeBtn.textContent = is3D ? 'Ver em 2D' : 'Ver em 3D'; modeBtn.href = is3D ? '/?modo-2d' : '/'; if (!is3D && QS.has('modo-2d') === false) modeBtn.hidden = true; }
   let lastRooms = ROOMS.join('|');
-  setInterval(() => { if (O3 && ROOMS.join('|') !== lastRooms) { lastRooms = ROOMS.join('|'); O3.rebuild(); } }, 2000);
+  setInterval(() => { if (O3 && ROOMS.join('|') !== lastRooms) { lastRooms = ROOMS.join('|'); O3.rebuild(ROOMS); } }, 2000);
 
   resize();
   connect();
