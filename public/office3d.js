@@ -168,7 +168,67 @@
     var screenOff = new T.MeshLambertMaterial({ color: '#0b0d10' });
     var monitors = [];
 
+    // ---------------------------------------------------------------- modelos 3D (Kenney e Quaternius, CC0)
+    // Carregados depois que a cena já aparece; enquanto isso (ou se falharem) ficam os desenhados à mão.
+    var MODELS = {}, MODEL_INFO = {}, modelsReady = false;
+    function toLambert(obj) {
+      obj.traverse(function (x) {
+        if (!x.isMesh) return;
+        var conv = function (m) {
+          var n = new T.MeshLambertMaterial({ color: m.color ? m.color.clone() : new T.Color('#ffffff'), map: m.map || null, transparent: !!m.transparent, opacity: m.opacity == null ? 1 : m.opacity });
+          n.name = m.name; return n;
+        };
+        x.material = Array.isArray(x.material) ? x.material.map(conv) : conv(x.material);
+        x.castShadow = shadows; x.receiveShadow = shadows;
+      });
+    }
+    function loadModels() {
+      if (!T.GLTFLoader || !window.fetch) return;
+      var loader = new T.GLTFLoader();
+      fetch('/models/lista.json', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+        var n = list.length;
+        if (!n) return;
+        var done = function () {
+          if (--n > 0) return;
+          modelsReady = true;
+          buildRooms();
+          people.forEach(function (P) { actors.remove(P.root); });
+          people.clear();
+        };
+        list.forEach(function (name) {
+          loader.load('/models/' + name + '.glb', function (g) {
+            toLambert(g.scene);
+            MODELS[name] = g;
+            var b = new T.Box3().setFromObject(g.scene);
+            MODEL_INFO[name] = { min: b.min.clone(), size: b.getSize(new T.Vector3()) };
+            done();
+          }, undefined, done);
+        });
+      }).catch(function () { /* sem modelos */ });
+    }
+    /** Cópia de um modelo com a base no chão, centrada, no tamanho pedido (h = altura, w = largura). */
+    function model(name, opt) {
+      var g = MODELS[name];
+      if (!g) return null;
+      opt = opt || {};
+      var info = MODEL_INFO[name], sz = info.size;
+      var c = g.scene.clone(true);
+      if (opt.tint) c.traverse(function (x) {
+        if (!x.isMesh) return;
+        var tm = function (m) { var col = opt.tint[m.name]; if (!col) return m; var n = m.clone(); n.color.set(col); return n; };
+        x.material = Array.isArray(x.material) ? x.material.map(tm) : tm(x.material);
+      });
+      var k = opt.h ? opt.h / sz.y : opt.w ? opt.w / sz.x : 1;
+      c.scale.setScalar(k);
+      c.position.set(-(info.min.x + sz.x / 2) * k, -info.min.y * k, -(info.min.z + sz.z / 2) * k);
+      var inner = new T.Group(); inner.add(c); inner.rotation.y = opt.rot || 0;
+      var w = new T.Group(); w.add(inner);
+      return w;
+    }
+
     function makeChair(color) {
+      var mc = model('chairDesk', { h: 0.6, rot: Math.PI, tint: { carpet: color || COL.chair } });   // modelo olha para +z; quem senta aqui olha para -z
+      if (mc) return mc;
       var g = new T.Group(), mat = M(color || COL.chair), dark = M(COL.metal);
       for (var k = 0; k < 5; k++) {
         var leg = B(g, dark, -0.012, 0.015, 0, 0.012, 0.03, 0.13);
@@ -184,6 +244,8 @@
       return g;  // a pessoa sentada olha para -z
     }
     function makePlant(s) {
+      var mp = (s || 1) < 0.6 ? model('plantSmall1', { h: 0.17 }) : model('pottedPlant', { h: 0.62 * (s || 1) });
+      if (mp) return mp;
       var g = new T.Group(); s = s || 1;
       B(g, M(COL.pot), -0.09 * s, 0, -0.09 * s, 0.09 * s, 0.2 * s, 0.09 * s);
       B(g, M('#4a3527'), -0.075 * s, 0.19 * s, -0.075 * s, 0.075 * s, 0.205 * s, 0.075 * s, true);
@@ -231,6 +293,8 @@
       return g;
     }
     function makeSofa(w, color) {
+      var ms = model('loungeSofa', { w: w, tint: { carpet: color || '#6b6f76' } });
+      if (ms) return ms;
       var g = new T.Group(), m = M(color || '#6b6f76'), d = 0.42;
       B(g, m, -w / 2, 0.05, -d / 2, w / 2, 0.22, d / 2);
       B(g, m, -w / 2, 0.05, -d / 2, w / 2, 0.5, -d / 2 + 0.12);          // encosto atrás (-z), frente +z
@@ -271,8 +335,9 @@
       var g = new T.Group();
       B(g, M('#8b5a2b'), -0.32, 0, -0.18, 0.32, 0.38, 0.18);               // balcão
       B(g, M('#eef0f2'), -0.34, 0.38, -0.2, 0.34, 0.41, 0.2);
-      B(g, M('#2d333b'), -0.25, 0.41, -0.12, -0.03, 0.66, 0.1);             // máquina
-      B(g, M('#c0392b'), -0.2, 0.6, 0.1, -0.08, 0.63, 0.11, true);
+      var cm = model('kitchenCoffeeMachine', { h: 0.24 });
+      if (cm) place(g, cm, -0.14, 0, 0, 0.41);
+      else { B(g, M('#2d333b'), -0.25, 0.41, -0.12, -0.03, 0.66, 0.1); B(g, M('#c0392b'), -0.2, 0.6, 0.1, -0.08, 0.63, 0.11, true); }   // máquina
       C(g, M('#ffffff'), 0.03, 0.025, 0.06, 0.08, 0.41, 0.02, 10); C(g, M('#e3b341'), 0.03, 0.025, 0.06, 0.18, 0.41, -0.03, 10);
       return g;
     }
@@ -537,8 +602,24 @@
       });
     }
 
+    function decor(R, name) {
+      var g = R.g, put = function (m, x, z, rot, y) { if (m) place(g, m, x, z, rot || 0, y || 0); };
+      var work = name !== 'Entrada' && name !== 'Sala de Jogos';
+      if (work) put(model('trashcan', { h: 0.2 }), 2.55, 1.55);
+      switch (name) {
+        case 'CEO IA': put(model('rugRectangle', { w: 1.3 }), 1.25, 2.85); put(model('lampRoundFloor', { h: 0.8 }), 2.3, 3.25); break;
+        case 'Vendas': case 'Pós-venda': put(model('lampRoundFloor', { h: 0.8 }), 2.0, 3.25); put(model('rugRectangle', { w: 1.1 }), 1.25, 2.95); break;
+        case 'Sua mesa / Aprovações': put(model('laptop', { h: 0.11 }), 1.5, 1.1, 0, 0.39); break;
+        case 'Sala de Jogos': put(model('rugRound', { w: 1.0 }), 2.48, 1.2); put(model('speaker', { h: 0.55 }), 3.3, 0.2); put(model('speaker', { h: 0.55 }), 1.75, 0.2); put(model('kitchenFridgeSmall', { h: 0.45 }), 3.3, 2.75, -Math.PI / 2); break;
+        case 'Entrada': put(model('rugRound', { w: 1.05 }), 1.6, 2.37); put(model('rugRound', { w: 0.95 }), 2.8, 2.02); put(model('sideTableDrawers', { h: 0.28 }), 0.25, 0.2); break;
+        case 'Curso IA Professores': put(model('radio', { h: 0.12 }), 0.8, 0.95, 0, 0.39); break;
+        default: break;
+      }
+    }
+
     function furnish(R, name, i, accent) {
       var g = R.g;
+      if (modelsReady) decor(R, name);
       var work = name !== 'Entrada' && name !== 'Sala de Jogos';
       if (work) workstations(R, i);
       var wallItem = function (kind, x) { place(g, makeWallBoard(1.15, 0.36, boardTex(kind, accent)), x || 1.75, 0.012, 0, 0.5); };
@@ -600,7 +681,7 @@
           var CH = ['#e53935', '#1e88e5', '#43a047', '#fbc02d', '#8e24aa', '#00897b', '#f4511e'];
           cfg.WAIT_SLOTS.forEach(function (s, k) {
             var f = focusFor('Entrada', s), dx = f[0] - s.p[0], dz = f[1] - s.p[1];
-            place(g, makeChair(CH[k % CH.length]), s.p[0], s.p[1], Math.atan2(-dx, -dz));
+            place(g, model('loungeChair', { h: 0.44, rot: Math.PI, tint: { carpet: CH[k % CH.length] } }) || makeChair(CH[k % CH.length]), s.p[0], s.p[1], Math.atan2(-dx, -dz));
           });
           var chess = place(g, makeTable(0.2, 0.3, '#f4f5f6', false), 1.6, 2.37);
           var board = new T.Mesh(new T.PlaneGeometry(0.22, 0.22), new T.MeshLambertMaterial({ map: canvasTex(64, 64, function (c) { for (var a = 0; a < 8; a++) for (var b = 0; b < 8; b++) { c.fillStyle = (a + b) % 2 ? '#3b2a1a' : '#f1e3c6'; c.fillRect(a * 8, b * 8, 8, 8); } }) }));
@@ -673,7 +754,62 @@
       var m = new T.Mesh(UNIT, mat); m.scale.set(w, len, d); m.position.y = -len / 2; m.castShadow = shadows; pivot.add(m);
       return pivot;
     }
+    // personagens animados (Quaternius): roupa na cor da função; terno/vestido para CEO e Vendas
+    var CHARS_M = ['Male_Casual', 'Male_Shirt', 'Male_LongSleeve', 'Male_Suit'], CHARS_F = ['Female_Casual', 'Female_Alternative', 'Female_TankTop', 'Female_Dress'];
+    var FORMAL = { 'CEO / Estrategista': 1, 'Vendedor': 1 };
+    var CH_K = 0.22, SIT_DY = 0, SIT_FWD = 0.13;
+    function makeModelPerson(s) {
+      if (!T.SkeletonUtils) return null;
+      var a = s.data || {}, h = hash(a.id || 'x');
+      var list = ((h >> 2) % 2) ? CHARS_F : CHARS_M;
+      var g = MODELS[FORMAL[a.role] ? list[3] : list[h % 3]];
+      if (!g) return null;
+      var ch = T.SkeletonUtils.clone(g.scene);
+      ch.scale.setScalar(CH_K);
+      ch.traverse(function (x) {
+        if (!x.isMesh) return;
+        x.frustumCulled = false; x.castShadow = shadows;
+        var tm = function (m) { if (!/^(Shirt|Dress|Jacket|LightJacket)$/.test(m.name)) return m; var n = m.clone(); n.color.set(s.shirt || '#8b949e'); return n; };
+        x.material = Array.isArray(x.material) ? x.material.map(tm) : tm(x.material);
+      });
+      var root = new T.Group(), body = new T.Group(); root.add(body); body.add(ch);
+      var mixer = new T.AnimationMixer(ch), acts = {};
+      g.animations.forEach(function (c) { acts[c.name.replace(/^(Man|Female)_/, '')] = mixer.clipAction(c); });
+      var bones = {}; ch.traverse(function (x) { if (x.isBone) bones[x.name] = x; });
+      // pose de descanso dos braços: recolocada a cada quadro antes da animação (se a animação não mexe neles, o ajuste não acumula)
+      var rest = {};
+      ['UpperArmR', 'UpperArmL'].forEach(function (n) { if (bones[n]) rest[n] = bones[n].quaternion.clone(); });
+      var P = { root: root, body: body, h: h, model: true, mixer: mixer, acts: acts, bones: bones, rest: rest, cur: null };
+      // objetos na mão direita (compensando a escala do esqueleto)
+      var hand = bones.PalmR || bones.LowerArmR;
+      var holder = new T.Group();
+      if (hand) {
+        root.updateMatrixWorld(true);
+        var ws = new T.Vector3(); hand.getWorldScale(ws);
+        holder.scale.setScalar(1 / (ws.x || 1)); hand.add(holder);
+      } else root.add(holder);
+      var inner = new T.Group(); inner.position.y = 0.17; holder.add(inner);
+      finishPerson(P, s, inner);
+      return P;
+    }
+    /** Aro de status, ícone, objetos de lazer e campos comuns (boneco desenhado ou modelo). */
+    function finishPerson(P, s, handParent) {
+      var root = P.root;
+      var ring = new T.Mesh(ringGeo, ringMat('ocioso')); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.012; root.add(ring); P.ring = ring;
+      var icon = new T.Sprite(statusIcon('ocioso')); icon.userData.icon = 20; fitSprite(icon); icon.center.set(0.5, -0.25); icon.position.y = 1.0; icon.renderOrder = 11; root.add(icon); P.icon = icon;
+      var hp = handParent;
+      var cup = new T.Mesh(cyl(0.025, 0.02, 0.06, 10), M('#ffffff')); cup.position.y = -0.17; cup.visible = false; hp.add(cup); P.cup = cup;
+      var phone = new T.Mesh(UNIT, M('#111418')); phone.scale.set(0.045, 0.085, 0.01); phone.position.set(0, -0.17, 0.02); phone.visible = false; hp.add(phone); P.phone = phone;
+      var mag = new T.Mesh(UNIT, M('#e85d75')); mag.scale.set(0.16, 0.2, 0.01); mag.position.set(-0.07, -0.17, 0.05); mag.visible = false; hp.add(mag); P.mag = mag;
+      var pad = new T.Mesh(UNIT, M('#2d333b')); pad.scale.set(0.1, 0.02, 0.05); pad.position.set(-0.06, -0.17, 0.03); pad.visible = false; hp.add(pad); P.pad = pad;
+      var paddle = new T.Mesh(cyl(0.05, 0.05, 0.01, 12), M('#c0392b')); paddle.rotation.x = Math.PI / 2; paddle.position.set(0, -0.2, 0.02); paddle.visible = false; hp.add(paddle); P.paddle = paddle;
+      var dart = new T.Mesh(UNIT, M('#e3b341')); dart.scale.set(0.01, 0.01, 0.08); dart.position.set(0, -0.17, 0.04); dart.visible = false; hp.add(dart); P.dart = dart;
+      P.heading = 0; P.walk = 0; P.label = null; P.labelText = ''; P.say = null; P.sayText = ''; P.scale = 0.01;
+      P.prev = null; P.shirt = s.shirt;
+    }
+
     function makePerson(s) {
+      if (modelsReady) { var mp = makeModelPerson(s); if (mp) return mp; }
       var h = hash(s.data ? s.data.id : String(Math.random()));
       var shirt = M(s.shirt || '#8b949e'), skin = M(s.skin || '#e0b48f'), hair = M(s.hair || '#2b1d14');
       var pants = M(PANTS[h % PANTS.length]), shoe = M('#1b1d21');
@@ -736,18 +872,7 @@
         var item = new T.Mesh(UNIT, M(acc === 'tablet' ? '#1f2328' : acc === 'caderno' ? '#d29922' : '#a0703f')); item.scale.set(0.11, 0.15, 0.012);
         item.position.set(0, -0.14, 0.03); item.rotation.x = -0.4; P.elL.add(item); P.item = item;
       }
-      // aro de status no chão, ícone e nome
-      var ring = new T.Mesh(ringGeo, ringMat('ocioso')); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.012; root.add(ring); P.ring = ring;
-      var icon = new T.Sprite(statusIcon('ocioso')); icon.userData.icon = 20; fitSprite(icon); icon.center.set(0.5, -0.25); icon.position.y = 1.0; icon.renderOrder = 11; root.add(icon); P.icon = icon;
-      // objetos de lazer
-      var cup = new T.Mesh(cyl(0.025, 0.02, 0.06, 10), M('#ffffff')); cup.position.y = -0.17; cup.visible = false; P.elR.add(cup); P.cup = cup;
-      var phone = new T.Mesh(UNIT, M('#111418')); phone.scale.set(0.045, 0.085, 0.01); phone.position.set(0, -0.17, 0.02); phone.visible = false; P.elR.add(phone); P.phone = phone;
-      var mag = new T.Mesh(UNIT, M('#e85d75')); mag.scale.set(0.16, 0.2, 0.01); mag.position.set(-0.07, -0.17, 0.05); mag.visible = false; P.elR.add(mag); P.mag = mag;
-      var pad = new T.Mesh(UNIT, M('#2d333b')); pad.scale.set(0.1, 0.02, 0.05); pad.position.set(-0.06, -0.17, 0.03); pad.visible = false; P.elR.add(pad); P.pad = pad;
-      var paddle = new T.Mesh(cyl(0.05, 0.05, 0.01, 12), M('#c0392b')); paddle.rotation.x = Math.PI / 2; paddle.position.set(0, -0.2, 0.02); paddle.visible = false; P.elR.add(paddle); P.paddle = paddle;
-      var dart = new T.Mesh(UNIT, M('#e3b341')); dart.scale.set(0.01, 0.01, 0.08); dart.position.set(0, -0.17, 0.04); dart.visible = false; P.elR.add(dart); P.dart = dart;
-      P.heading = 0; P.walk = 0; P.label = null; P.labelText = ''; P.say = null; P.sayText = ''; P.scale = 0.01;
-      P.prev = null; P.shirt = s.shirt;
+      finishPerson(P, s, P.elR);
       return P;
     }
 
@@ -759,7 +884,51 @@
     function setRot(p, k, v, speed) { p.rotation[k] += (v - p.rotation[k]) * Math.min(1, speed); }
     function angDiff(a, b) { var d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
 
+    var SITS = { sit: 1, chess: 1, cards: 1, phone: 1, magazine: 1, videogame: 1 };
+    function animModel(P, name, t, dt, moving) {
+      var sit = !moving && SITS[name];
+      var clip = moving ? 'Walk' : (P.jump > 0 || name === 'wave') ? 'Clapping' : sit ? 'Sitting' : 'Idle';
+      if (P.cur !== clip && P.acts[clip]) {
+        var nx = P.acts[clip]; nx.reset(); nx.setEffectiveWeight(1); nx.fadeIn(P.cur ? 0.25 : 0); nx.play();
+        if (P.cur && P.acts[P.cur]) P.acts[P.cur].fadeOut(0.25);
+        P.cur = clip;
+      }
+      if (P.acts.Walk) P.acts.Walk.timeScale = 1.45;
+      for (var rn in P.rest) P.bones[rn].quaternion.copy(P.rest[rn]);
+      P.mixer.update(dt);
+      // braços por cima da animação: digitar, celular, revista, controle, raquete, dardo, café
+      var zr = 0, zl = 0, w = Math.sin(t * 13 + P.h), w2 = Math.sin(t * 12 + P.h + 1.7);
+      if (!moving) switch (name) {
+        case 'sit': zr = 1.0 + w * 0.07; zl = -(1.0 + w2 * 0.07); break;
+        case 'type': zr = 0.85 + w * 0.06; zl = -0.85; break;
+        case 'phone': zr = 1.55; zl = Math.sin(t * 0.5 + P.h) > 0.6 ? -0.8 : 0; break;
+        case 'magazine': zr = 1.05; zl = -1.05; break;
+        case 'videogame': zr = 0.9 + w * 0.05; zl = -(0.9 + w2 * 0.05); break;
+        case 'chess': case 'cards': zr = Math.sin(t * 0.8 + P.h) > 0.7 ? 1.25 : 0.7; zl = -0.6; break;
+        case 'play': zr = 0.8 + Math.sin(t * 5 + P.h * 0.1) * 0.55; break;
+        case 'darts': zr = ((t * 0.7 + P.h * 0.01) % 1) < 0.7 ? 1.9 : 1.0; break;
+        case 'coffee': zr = Math.sin(t * 0.9 + P.h) > 0.5 ? 1.6 : 0.7; break;
+        default: break;
+      }
+      if (P.bones.UpperArmR && zr) P.bones.UpperArmR.rotation.z += zr;
+      if (P.bones.UpperArmL && zl) P.bones.UpperArmL.rotation.z += zl;
+      var jy = P.jump > 0 ? Math.sin((1 - P.jump / 0.9) * Math.PI) * 0.18 : 0;
+      var ty = (sit ? SIT_DY + (name === 'videogame' ? -0.04 : 0) : 0) + jy;
+      P.body.position.y += (ty - P.body.position.y) * Math.min(1, dt * 10);
+      P.body.position.z += ((sit ? SIT_FWD : 0) - P.body.position.z) * Math.min(1, dt * 10);
+      props(P, name, t, moving);
+    }
+    function props(P, name, t, moving) {
+      P.cup.visible = !moving && name === 'coffee';
+      P.phone.visible = !moving && name === 'phone';
+      P.mag.visible = !moving && name === 'magazine';
+      P.pad.visible = !moving && name === 'videogame';
+      P.paddle.visible = !moving && name === 'play';
+      P.dart.visible = !moving && name === 'darts' && ((t * 0.7 + P.h * 0.01) % 1) < 0.7;
+    }
+
     function pose(P, name, t, dt, moving) {
+      if (P.model) return animModel(P, name, t, dt, moving);
       var k = Math.min(1, dt * 10), ph = P.walk;
       var sit = name === 'sit' || name === 'chess' || name === 'cards' || name === 'phone' || name === 'magazine' || name === 'videogame';
       var hipY = sit ? (name === 'videogame' ? 0.2 : 0.29) : 0.42;
@@ -816,12 +985,7 @@
       setRot(P.shL, 'z', tgt.shLz, k); setRot(P.shR, 'z', tgt.shRz, k);
       setRot(P.elL, 'x', tgt.elL, k); setRot(P.elR, 'x', tgt.elR, k);
       setRot(P.torso, 'x', tgt.torso, k); setRot(P.head, 'x', tgt.head, k); setRot(P.head, 'y', tgt.headY, k);
-      P.cup.visible = !moving && name === 'coffee';
-      P.phone.visible = !moving && name === 'phone';
-      P.mag.visible = !moving && name === 'magazine';
-      P.pad.visible = !moving && name === 'videogame';
-      P.paddle.visible = !moving && name === 'play';
-      P.dart.visible = !moving && name === 'darts' && ((t * 0.7 + P.h * 0.01) % 1) < 0.7;
+      props(P, name, t, moving);
       if (P.item) P.item.visible = moving || name === 'idle' || name === 'type' || name === 'wave';
     }
 
@@ -1088,6 +1252,7 @@
 
     buildRooms();
     resize();
+    setTimeout(loadModels, 50);
     return { draw: draw, rebuild: buildRooms, resize: resize, resetView: resetView, canvas: cvs };
   }
 })();

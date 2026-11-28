@@ -412,6 +412,14 @@ test('3D: three.js e office3d.js exigem login e vêm comprimidos', async () => {
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.headers['content-encoding'], 'gzip');
   assert.strictEqual((await req('GET', '/office3d.js', { headers: { Cookie: cookie } })).status, 200);
+  // modelos 3D (CC0): exigem login, lista e arquivo comprimido
+  assert.strictEqual((await req('GET', '/models/lista.json')).status, 401);
+  const lista = JSON.parse((await req('GET', '/models/lista.json', { headers: { Cookie: cookie } })).body);
+  assert.ok(lista.includes('Male_Casual') && lista.includes('chairDesk'));
+  const glb = await req('GET', '/models/chairDesk.glb', { headers: { Cookie: cookie, 'Accept-Encoding': 'gzip' } });
+  assert.strictEqual(glb.status, 200); assert.strictEqual(glb.headers['content-encoding'], 'gzip');
+  assert.strictEqual((await req('GET', '/models/../server.js', { headers: { Cookie: cookie } })).status, 404);
+  assert.strictEqual((await req('GET', '/vendor/three-extras.min.js', { headers: { Cookie: cookie } })).status, 200);
   // hook da nuvem: só com o token do hook
   assert.strictEqual((await req('GET', '/nuvem-hook.js')).status, 401);
   const h = await req('GET', '/nuvem-hook.js', { headers: auth });

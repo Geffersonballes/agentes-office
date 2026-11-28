@@ -594,6 +594,16 @@ const INDEX = fs.readFileSync(path.join(__dirname, 'public', 'index.html'));
 const APPJS = fs.readFileSync(path.join(__dirname, 'public', 'app.js'));
 const OFFICE3D = fs.readFileSync(path.join(__dirname, 'public', 'office3d.js'));
 const NUVEM_HOOK = fs.readFileSync(path.join(__dirname, 'nuvem-hook.js'));
+// Modelos 3D (CC0) e o carregador do three.js: lidos e comprimidos uma vez ao iniciar
+const gzip = (b) => require('zlib').gzipSync(b, { level: 9 });
+const EXTRAS = fs.readFileSync(path.join(__dirname, 'public', 'vendor', 'three-extras.min.js'));
+const EXTRAS_GZ = gzip(EXTRAS);
+const MODELS = new Map();
+try {
+  for (const f of fs.readdirSync(path.join(__dirname, 'public', 'models'))) {
+    if (/^[A-Za-z0-9_-]{1,60}\.glb$/.test(f)) { const b = fs.readFileSync(path.join(__dirname, 'public', 'models', f)); MODELS.set(f, { b, gz: gzip(b) }); }
+  }
+} catch (e) { /* sem modelos: o painel usa os bonecos desenhados */ }
 // three.js (MIT) já comprimido: ~600 KB viram ~150 KB
 const THREEJS = fs.readFileSync(path.join(__dirname, 'public', 'vendor', 'three.min.js'));
 const THREEJS_GZ = require('zlib').gzipSync(THREEJS, { level: 9 });
@@ -694,6 +704,15 @@ const server = http.createServer(async (req, res) => {
     if (p === '/' && req.method === 'GET') return send(req, res, 200, INDEX, 'text/html; charset=utf-8');
     if (p === '/app.js' && req.method === 'GET') return send(req, res, 200, APPJS, 'text/javascript; charset=utf-8');
     if (p === '/office3d.js' && req.method === 'GET') return send(req, res, 200, OFFICE3D, 'text/javascript; charset=utf-8');
+    if (req.method === 'GET' && (p === '/vendor/three-extras.min.js' || p === '/models/lista.json' || p.startsWith('/models/'))) {
+      const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+      const cache = { 'Cache-Control': 'private, max-age=604800', Vary: 'Accept-Encoding' };
+      if (p === '/models/lista.json') return json(req, res, 200, [...MODELS.keys()].map((f) => f.replace(/\.glb$/, '')));
+      if (p === '/vendor/three-extras.min.js') return send(req, res, 200, gz ? EXTRAS_GZ : EXTRAS, 'text/javascript; charset=utf-8', Object.assign(cache, gz ? { 'Content-Encoding': 'gzip' } : {}));
+      const m = MODELS.get(p.slice('/models/'.length));
+      if (!m) return send(req, res, 404, 'não encontrado');
+      return send(req, res, 200, gz ? m.gz : m.b, 'model/gltf-binary', Object.assign(cache, gz ? { 'Content-Encoding': 'gzip' } : {}));
+    }
     if (p === '/vendor/three.min.js' && req.method === 'GET') {
       const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
       return send(req, res, 200, gz ? THREEJS_GZ : THREEJS, 'text/javascript; charset=utf-8',

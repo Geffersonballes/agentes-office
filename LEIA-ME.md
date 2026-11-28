@@ -27,6 +27,7 @@ O painel abre em **3D** (WebGL, com a biblioteca three.js, licença MIT, em `pub
 - **Ver em 2D** (botão no topo ou `/?modo-2d`): a versão anterior, mais leve.
 - `/?modo-leve`: 3D sem sombras, para aparelhos fracos (TVs já entram assim sozinhas).
 - Se o navegador não tiver WebGL, o painel abre em 2D automaticamente.
+- **Modelos 3D gratuitos (CC0, domínio público):** personagens animados do **Quaternius** (andar, sentar, parado, palmas) e móveis do **Kenney** Furniture Kit (cadeiras, poltronas, sofás, plantas, máquina de café, frigobar, caixas de som, tapetes, abajur, lixeira). Ficam em `public/models/` (créditos em `public/models/LICENSES.md`), ~2,9 MB que viajam comprimidos (~0,8 MB). Enquanto carregam, aparecem os bonecos desenhados.
 
 ## Em que sala cada agente fica
 
