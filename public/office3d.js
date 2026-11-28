@@ -12,8 +12,96 @@
       return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl')));
     } catch (e) { return false; }
   }
-  window.Office3D = { supported: function () { return !!T && webglOK(); }, create: create };
+  window.Office3D = { supported: function () { return !!T && webglOK(); }, create: create, dress: dress };
   if (!T) return;
+
+  // ================================================================ figurino dos personagens (estilo "roupa de trabalho")
+  // Calça de trabalho, cinto, suspensório, botas, barba, cabelo e pele variados; mochila nos subagentes.
+  // As peças ficam presas aos ossos e são desenhadas no espaço do personagem (pose de fábrica).
+  var PANTS_W = ['#7a5230', '#8b6239', '#6b4a2e', '#5d6b45', '#55606e', '#7d6a4f'];
+  var SKINS = ['#f2cfae', '#e0b08a', '#c68c63', '#a46a45', '#7d4e32', '#5e3a26'];
+  var HAIRS = ['#2b1d14', '#4a3222', '#1b1b1b', '#7a4b26', '#b5874f', '#5b2b2b', '#3b2f2a'];
+  var LEATHER = ['#5a3a22', '#6b4426', '#4a3020', '#7a5232'];
+  var dressMats = {};
+  function dmat(c, extra) {
+    var k = c + (extra || '');
+    return dressMats[k] || (dressMats[k] = new T.MeshLambertMaterial({ color: c, side: extra === 'dupla' ? T.DoubleSide : T.FrontSide }));
+  }
+  function strap(parent, mat, a, b, w, d) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    var m = new T.Mesh(new T.BoxGeometry(w, len, d), mat);
+    m.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+    m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(dx / len, dy / len, dz / len));
+    parent.add(m); return m;
+  }
+  /**
+   * ch: personagem clonado (já na escala), body: grupo pai sem escala; o: { h (número), shirt, female, sub, shadows }.
+   * Pinta os materiais e prende as peças aos ossos.
+   */
+  function dress(ch, body, o) {
+    var h = o.h || 0, female = !!o.female;
+    var pick = function (arr, salt) { var v = Math.imul(h ^ (salt * 0x9e3779b1), 0x85ebca6b) >>> 0; v ^= v >>> 13; return arr[v % arr.length]; };
+    var skin = pick(SKINS, 1), hair = o.hair || pick(HAIRS, 2);
+    var pants = pick(PANTS_W, 3), boots = pick(LEATHER, 4);
+    var shirt = new T.Color(o.shirt || '#8b949e').lerp(new T.Color('#7d786d'), 0.28).getStyle();
+    ch.traverse(function (x) {
+      if (!x.isMesh) return;
+      var tm = function (m) {
+        var c = /^(Shirt|Dress|Jacket)$/.test(m.name) ? shirt : /^LightJacket$/.test(m.name) ? '#d9d4c7'
+          : /^Pants$/.test(m.name) ? pants : /^(Socks|Shoes)$/.test(m.name) ? boots
+          : /^Skin$/.test(m.name) ? skin : /^(Hair|HairBase|Hair2|Eyebrows)$/.test(m.name) ? hair : null;
+        if (!c) return m;
+        var n = m.clone(); n.color.set(c); return n;
+      };
+      x.material = Array.isArray(x.material) ? x.material.map(tm) : tm(x.material);
+    });
+    // prende um grupo ao osso, alinhado ao espaço do corpo na pose de fábrica
+    body.updateMatrixWorld(true);
+    var inv = new T.Matrix4();
+    function onBone(name) {
+      var bone = ch.getObjectByName(name);
+      if (!bone) return null;
+      var g = new T.Group(); g.matrixAutoUpdate = false;
+      inv.copy(bone.matrixWorld).invert();
+      g.matrix.multiplyMatrices(inv, body.matrixWorld);
+      bone.add(g); return g;
+    }
+    var hy = female ? -0.034 : 0;      // as mulheres são um pouco mais baixas
+    var leather = dmat(boots), dark = dmat('#2a211b'), metal = dmat('#c9b27a');
+    // cinto com fivela
+    var hips = onBone('Hips');
+    if (hips) {
+      var belt = new T.Mesh(new T.CylinderGeometry(0.094, 0.09, 0.022, 20, 1, true), dmat('#3a2a1e', 'dupla'));
+      belt.scale.z = 0.78; belt.position.set(0, 0.488, 0.006); hips.add(belt);
+      var buckle = new T.Mesh(new T.BoxGeometry(0.03, 0.024, 0.008), metal); buckle.position.set(0, 0.488, 0.078); hips.add(buckle);
+    }
+    // suspensório (homens e metade das mulheres)
+    var torso = onBone('Torso');
+    if (torso && !o.formal && (!female || h % 2)) {
+      var sm = dmat(pick(['#b5652f', '#8a4b2a', '#6b4a2e', '#3f4a5a'], 5));
+      [-1, 1].forEach(function (sd) {
+        strap(torso, sm, [sd * 0.042, 0.81 + hy, 0.04], [sd * 0.045, 0.70 + hy, 0.082], 0.018, 0.008);   // frente: ombro → peito
+        strap(torso, sm, [sd * 0.045, 0.70 + hy, 0.082], [sd * 0.05, 0.5, 0.086], 0.018, 0.008);         // peito → cintura
+        strap(torso, sm, [sd * 0.042, 0.81 + hy, 0.03], [sd * 0.04, 0.70 + hy, -0.074], 0.018, 0.008);   // costas
+        strap(torso, sm, [sd * 0.04, 0.70 + hy, -0.074], [-sd * 0.03, 0.5, -0.082], 0.018, 0.008);       // em X até a cintura
+        var clip = new T.Mesh(new T.BoxGeometry(0.022, 0.014, 0.01), metal); clip.position.set(sd * 0.05, 0.505, 0.09); torso.add(clip);
+      });
+    }
+    // mochila laranja nos subagentes (trabalho de campo)
+    if (torso && o.sub) {
+      var bag = new T.Mesh(new T.BoxGeometry(0.105, 0.13, 0.05), dmat('#d9692a')); bag.position.set(0, 0.69 + hy, -0.085); torso.add(bag);
+      var flap = new T.Mesh(new T.BoxGeometry(0.108, 0.04, 0.054), dmat('#b8551f')); flap.position.set(0, 0.745 + hy, -0.085); torso.add(flap);
+    }
+    // barba (60% dos homens) e bigode
+    var head = onBone('Head');
+    if (head && !female && h % 5 < 3) {
+      var bm = dmat(hair, 'dupla');
+      // só a parte de baixo do rosto: queixo e maxilar
+      var beard = new T.Mesh(new T.SphereGeometry(0.058, 16, 8, 0, Math.PI, Math.PI * 0.64, Math.PI * 0.34), bm);
+      beard.position.set(0, 0.99, -0.004); beard.scale.set(0.98, 1.15, 1.18); head.add(beard);
+      var must = new T.Mesh(new T.BoxGeometry(0.034, 0.008, 0.012), bm); must.position.set(0, 0.962, 0.064); head.add(must);
+    }
+  }
 
   // ================================================================ utilidades
   var UNIT = new T.BoxGeometry(1, 1, 1);
@@ -755,7 +843,7 @@
       return pivot;
     }
     // personagens animados (Quaternius): roupa na cor da função; terno/vestido para CEO e Vendas
-    var CHARS_M = ['Male_Casual', 'Male_Shirt', 'Male_LongSleeve', 'Male_Suit'], CHARS_F = ['Female_Casual', 'Female_Alternative', 'Female_TankTop', 'Female_Dress'];
+    var CHARS_M = ['Male_LongSleeve', 'Male_Shirt', 'Male_LongSleeve', 'Male_Suit'], CHARS_F = ['Female_Alternative', 'Female_TankTop', 'Female_Alternative', 'Female_Dress'];
     var FORMAL = { 'CEO / Estrategista': 1, 'Vendedor': 1 };
     var CH_K = 0.22, SIT_DY = 0, SIT_FWD = 0.13;
     function makeModelPerson(s) {
@@ -766,13 +854,10 @@
       if (!g) return null;
       var ch = T.SkeletonUtils.clone(g.scene);
       ch.scale.setScalar(CH_K);
-      ch.traverse(function (x) {
-        if (!x.isMesh) return;
-        x.frustumCulled = false; x.castShadow = shadows;
-        var tm = function (m) { if (!/^(Shirt|Dress|Jacket|LightJacket)$/.test(m.name)) return m; var n = m.clone(); n.color.set(s.shirt || '#8b949e'); return n; };
-        x.material = Array.isArray(x.material) ? x.material.map(tm) : tm(x.material);
-      });
+      ch.traverse(function (x) { if (x.isMesh) { x.frustumCulled = false; x.castShadow = shadows; } });
       var root = new T.Group(), body = new T.Group(); root.add(body); body.add(ch);
+      dress(ch, body, { h: h, shirt: s.shirt, female: list === CHARS_F, sub: a.kind === 'sub', hair: s.hair, formal: !!FORMAL[a.role] });
+      body.traverse(function (x) { if (x.isMesh) x.castShadow = shadows; });
       var mixer = new T.AnimationMixer(ch), acts = {};
       g.animations.forEach(function (c) { acts[c.name.replace(/^(Man|Female)_/, '')] = mixer.clipAction(c); });
       var bones = {}; ch.traverse(function (x) { if (x.isBone) bones[x.name] = x; });

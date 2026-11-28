@@ -1,6 +1,6 @@
 # Modelos 3D (todos CC0 1.0 — domínio público)
 
-- Personagens animados (Male_*, Female_*): **Quaternius** — https://quaternius.com — CC0 1.0
+- Personagens animados (Male_LongSleeve, Male_Shirt, Male_Suit, Female_Alternative, Female_TankTop, Female_Dress): **Quaternius** — https://quaternius.com — CC0 1.0
 - Móveis (chairDesk, loungeChair, loungeSofa, loungeDesignSofa, pottedPlant, plantSmall1, kitchenCoffeeMachine,
   kitchenFridgeSmall, trashcan, lampRoundFloor, rugRectangle, rugRound, speaker, stoolBar, laptop, sideTableDrawers,
   tableCoffee, radio): **Kenney** Furniture Kit — https://kenney.nl — CC0 1.0

@@ -415,7 +415,7 @@ test('3D: three.js e office3d.js exigem login e vêm comprimidos', async () => {
   // modelos 3D (CC0): exigem login, lista e arquivo comprimido
   assert.strictEqual((await req('GET', '/models/lista.json')).status, 401);
   const lista = JSON.parse((await req('GET', '/models/lista.json', { headers: { Cookie: cookie } })).body);
-  assert.ok(lista.includes('Male_Casual') && lista.includes('chairDesk'));
+  assert.ok(lista.includes('Male_LongSleeve') && lista.includes('chairDesk'));
   const glb = await req('GET', '/models/chairDesk.glb', { headers: { Cookie: cookie, 'Accept-Encoding': 'gzip' } });
   assert.strictEqual(glb.status, 200); assert.strictEqual(glb.headers['content-encoding'], 'gzip');
   assert.strictEqual((await req('GET', '/models/../server.js', { headers: { Cookie: cookie } })).status, 404);
