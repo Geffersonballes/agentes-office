@@ -185,6 +185,9 @@ const DEFAULT_RULES = {
   'Sala de Jogos': ['jogo', 'game', 'teste', 'brincadeira'],
 };
 let RULES = DEFAULT_RULES;
+// salas que podem ser "assunto" de um pedido
+const TOPIC_ROOMS = ROOMS.filter((r) => r !== 'Sala de Jogos' && r !== 'Entrada' && r !== 'Sua mesa / Aprovações');
+const TOPIC_DEFAULT = 'Operações';   // pedido sem assunto claro: o gerente de operações cuida
 try {
   if (fs.existsSync(ROOMS_FILE)) {
     const custom = JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8'));
@@ -288,7 +291,7 @@ function sanitizeUsage(raw) {
   const machine = typeof raw.machine === 'string' && /^[a-f0-9]{6,32}$/.test(raw.machine) ? raw.machine : null;
   const list = (arr, max, re) => (Array.isArray(arr) ? arr.slice(0, max).filter((x) => x && typeof x.name === 'string' && re.test(x.name))
     .map((x) => Object.assign({ name: x.name }, scope(x))) : []);
-  return { session_id: sid, input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
+  return { session_id: sid, source: raw.source === 'hook' ? 'hook' : 'statusline', input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
     cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day),
     ctx: cm && machine ? { machine, all: scope(cm.all), today: scope(cm.today), week: scope(cm.week), session: scope(cm.session),
       tools: list(cm.tools, 15, /^[A-Za-z0-9_.:\-]{1,80}$/), kinds: list(cm.kinds, 8, /^(prompt|edit|cmd|toolerr|index|decision|\?)$/) } : null };
@@ -299,8 +302,14 @@ function applyUsage(u) {
   if (!r) { r = { input: 0, output: 0, cost: 0, day, week, dIn: 0, dOut: 0, wIn: 0, wOut: 0, dCost: 0, wCost: 0 }; usage.sessions.set(u.session_id, r); }
   if (r.day !== day) { r.day = day; r.dIn = r.input; r.dOut = r.output; r.dCost = r.cost; }
   if (r.week !== week) { r.week = week; r.wIn = r.input; r.wOut = r.output; r.wCost = r.cost; }
+  // a barra de status (PC) manda os totais oficiais; o hook (nuvem e PC) soma o histórico da sessão.
+  // Se a sessão já tem dados da barra de status, os do hook são ignorados para não contar duas vezes.
+  const fromHook = u.source === 'hook';
+  if (!fromHook && r.src === 'hook') { r.src = 'statusline'; r.input = u.input === null ? r.input : u.input; r.output = u.output === null ? r.output : u.output; }
+  if (!r.src) r.src = u.source;
+  if (fromHook && r.src === 'statusline') { /* ignora */ }
   // os totais da sessão só crescem; se diminuírem, a sessão foi reiniciada
-  if (u.input !== null && u.output !== null) {
+  else if (u.input !== null && u.output !== null) {
     if (u.input < r.input || u.output < r.output) { r.dIn = r.wIn = 0; r.dOut = r.wOut = 0; r.dCost = r.wCost = 0; }
     r.input = u.input; r.output = u.output;
   }
@@ -425,7 +434,8 @@ function applyEvent(ev) {
       break;
     case 'UserPromptSubmit':
       clearTimeout(timers.get('idle:' + sid));
-      if (!stale) setStatus(main, 'trabalhando', pickRoom(roomHint, main.room === 'Entrada' || main.room === 'Sua mesa / Aprovações' ? 'Operações' : main.room));
+      if (ev.topic) main.topic = ev.topic === 'geral' ? TOPIC_DEFAULT : ev.topic;
+      if (!stale) setStatus(main, 'trabalhando', ev.topic ? main.topic : pickRoom(roomHint, main.room === 'Entrada' || main.room === 'Sua mesa / Aprovações' ? 'Operações' : main.room));
       break;
     case 'PreToolUse':
     case 'PostToolUse':
@@ -436,7 +446,13 @@ function applyEvent(ev) {
       const isTask = ev.tool_name === 'Task' || ev.tool_name === 'Agent';
       target.tool = ev.tool_name || target.tool;
       const st = target === main && (isTask || main.subs.size) ? 'delegando' : 'trabalhando';
-      const room = isTask ? target.room : pickRoom(roomHint, target.room === 'Entrada' || target.room === 'Sua mesa / Aprovações' ? 'Tecnologia' : target.room);
+      // com assunto conhecido, o agente fica na sala do assunto: Bash/Read/Edit não o mandam para a Tecnologia.
+      // Só ferramentas de serviços (mcp__gmail, mcp__canva…) puxam para a sala do serviço.
+      const topic = target.topic || main.topic;
+      const svc = /^mcp__/i.test(ev.tool_name || '') ? pickRoom(roomHint, null) : null;
+      const room = isTask ? target.room
+        : topic ? (svc || topic)
+        : pickRoom(roomHint, target.room === 'Entrada' || target.room === 'Sua mesa / Aprovações' ? 'Tecnologia' : target.room);
       setStatus(target, st, room);
       break;
     }
@@ -449,7 +465,8 @@ function applyEvent(ev) {
         agents.set(subId, s);
       }
       main.subs.add(subId);
-      setStatus(s, 'trabalhando', pickRoom(roomHint, 'Produto'));
+      if (main.topic) s.topic = main.topic;          // o subagente trabalha no mesmo assunto do chefe
+      setStatus(s, 'trabalhando', s.topic || pickRoom(roomHint, 'Produto'));
       setStatus(main, 'delegando');
       break;
     }
@@ -500,6 +517,8 @@ function sanitize(raw) {
   const tool = clip(raw.tool_name, 80); if (tool) out.tool_name = tool;
   const nt = clip(raw.notification_type, 40); if (nt) out.notification_type = nt;
   if (raw.needs_approval === true) out.needs_approval = true;
+  // assunto do pedido (o hook decide no PC e manda só o nome da sala)
+  if (raw.topic === 'geral' || (TOPIC_ROOMS.includes(raw.topic))) out.topic = raw.topic;
   if (typeof raw.ts === 'number' && isFinite(raw.ts)) out.ts = raw.ts;
   if (PANEL_DETAIL === 'normal') { const d = clip(raw.detail, 120); if (d) out.detail = d; }
   return out;
@@ -553,6 +572,11 @@ function runDemo() {
 // ---------------------------------------------------------------- páginas
 const INDEX = fs.readFileSync(path.join(__dirname, 'public', 'index.html'));
 const APPJS = fs.readFileSync(path.join(__dirname, 'public', 'app.js'));
+const OFFICE3D = fs.readFileSync(path.join(__dirname, 'public', 'office3d.js'));
+const NUVEM_HOOK = fs.readFileSync(path.join(__dirname, 'nuvem-hook.js'));
+// three.js (MIT) já comprimido: ~600 KB viram ~150 KB
+const THREEJS = fs.readFileSync(path.join(__dirname, 'public', 'vendor', 'three.min.js'));
+const THREEJS_GZ = require('zlib').gzipSync(THREEJS, { level: 9 });
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function loginPage(msg) {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -578,6 +602,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/healthz') return send(req, res, 200, 'ok');
 
     // ---- hook
+    // hook das sessões na nuvem (sem segredos dentro); exige o token do hook, que o proxy da nuvem injeta
+    if (p === '/nuvem-hook.js' && req.method === 'GET') {
+      if (AUTH_HOOK) {
+        const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+        if (!m || !safeEqual(m[1].trim(), HOOK_TOKEN)) return send(req, res, 401, 'não autorizado', null, { 'WWW-Authenticate': 'Bearer' });
+      }
+      return send(req, res, 200, NUVEM_HOOK, 'text/javascript; charset=utf-8');
+    }
     if (p === '/usage') {
       if (req.method !== 'POST') return send(req, res, 405, 'método não permitido', null, { Allow: 'POST' });
       if (!limitEvent(ip)) return send(req, res, 429, 'muitas requisições', null, { 'Retry-After': '60' });
@@ -641,6 +673,12 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/' && req.method === 'GET') return send(req, res, 200, INDEX, 'text/html; charset=utf-8');
     if (p === '/app.js' && req.method === 'GET') return send(req, res, 200, APPJS, 'text/javascript; charset=utf-8');
+    if (p === '/office3d.js' && req.method === 'GET') return send(req, res, 200, OFFICE3D, 'text/javascript; charset=utf-8');
+    if (p === '/vendor/three.min.js' && req.method === 'GET') {
+      const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+      return send(req, res, 200, gz ? THREEJS_GZ : THREEJS, 'text/javascript; charset=utf-8',
+        Object.assign({ 'Cache-Control': 'private, max-age=604800', Vary: 'Accept-Encoding' }, gz ? { 'Content-Encoding': 'gzip' } : {}));
+    }
     if (p === '/state' && req.method === 'GET') return json(req, res, 200, snapshot());
     if (p === '/history' && req.method === 'GET') {
       const since = Math.max(Number(url.searchParams.get('since')) || 0, Date.now() - 36 * 3600e3);

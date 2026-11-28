@@ -24,6 +24,14 @@ main{flex:1;display:flex;min-height:0}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
 #roomcard{position:absolute;right:12px;top:44px;width:min(320px,calc(100% - 24px));max-height:70%;overflow:auto;background:rgba(22,27,34,.97);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 #roomcard[hidden]{display:none}
+#roomcard{z-index:5}
+#cv3d{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#cv3d:active{cursor:grabbing}
+#board3d{position:absolute;left:auto;bottom:auto;right:10px;top:10px;z-index:3;cursor:pointer;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+#clock3d{position:absolute;left:10px;top:10px;z-index:3;font-size:12px;font-weight:600;color:#c9d1d9;background:rgba(13,17,23,.75);padding:4px 10px;border-radius:11px;pointer-events:none}
+.btn[hidden]{display:none}
+#pill3d{position:absolute;right:8px;top:8px;z-index:3;font-size:11px;padding:4px 10px;border-radius:11px;background:rgba(13,17,23,.85)}
+@media (max-width:640px){#clock3d{font-size:10px;padding:3px 8px;top:8px;left:8px}}
 .rc-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;margin-bottom:6px}
 .rc-x{background:none;border:0;color:var(--muted);font-size:20px;line-height:1;padding:0 4px;cursor:pointer}
 .rc-sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
@@ -63,6 +71,7 @@ footer{font-size:11px;color:var(--muted);padding:6px 16px;border-top:1px solid v
   <h1>Escritório de Agentes</h1>
   <div id="live"><i></i><span>conectando…</span></div>
   <div class="sp"></div>
+  <a class="btn" id="modo" href="/?modo-2d">Ver em 2D</a>
   <button id="demo" type="button" title="Roda uma simulação de ~25 s">Simular</button>
   <a class="btn" href="/logout">Sair</a>
 </header>
@@ -79,6 +88,8 @@ footer{font-size:11px;color:var(--muted);padding:6px 16px;border-top:1px solid v
   </aside>
 </main>
 <footer id="foot">Modo de detalhe: —</footer>
+<script src="/vendor/three.min.js"></script>
+<script src="/office3d.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

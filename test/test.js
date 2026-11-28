@@ -220,8 +220,10 @@ test('hook: entrega o evento com token, em modo mínimo, sem conteúdo', async (
 
 test('hook: payload mínimo não leva prompt, comando nem caminho', () => {
   const { buildPayload } = require(path.join(ROOT, 'hook.js'));
-  const p = buildPayload({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'texto privado', cwd: '/c/proj', tool_input: { file_path: '/a/b.txt' } }, 'minimo');
-  assert.deepStrictEqual(Object.keys(p).sort(), ['event', 'session_id', 'ts']);
+  const p = buildPayload({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'algo privado', cwd: '/c/proj', tool_input: { file_path: '/a/b.txt' } }, 'minimo');
+  assert.deepStrictEqual(Object.keys(p).sort(), ['event', 'session_id', 'topic', 'ts']);
+  assert.strictEqual(p.topic, 'geral');                // só o nome da sala, nunca o texto
+  assert.strictEqual(buildPayload({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'escreve uma headline pro post' }, 'minimo').topic, 'Copy');
   const n = buildPayload({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Edit', tool_input: { file_path: '/a/b/arquivo.js' } }, 'normal');
   assert.strictEqual(n.detail, 'arquivo.js');
 });
@@ -357,4 +359,62 @@ test('context-mode: lê a economia do context.db e mostra no painel', async () =
   assert.ok(!u.context_mode.tools.find((t) => t.name === 'ctx_stats'));
   assert.ok(u.context_mode.kinds.find((k) => k.name === 'index'));
   assert.doesNotMatch(body, /SEGREDO/);
+});
+
+test('assunto do pedido: o agente fica na sala do assunto mesmo usando Bash/Read', async () => {
+  const sid = 'topico-1';
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: sid, event: 'UserPromptSubmit', topic: 'Copy' }) });
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: sid, event: 'PreToolUse', tool_name: 'Bash' }) });
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: sid, event: 'SubagentStart', agent_id: 'tp1', agent_type: 'Explore' }) });
+  const cookie = await login();
+  let st = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body);
+  assert.strictEqual(st.agents.find((a) => a.id === sid).room, 'Copy');
+  assert.strictEqual(st.agents.find((a) => a.id === sid + ':tp1').room, 'Copy');
+  // serviço específico puxa para a sala dele; pedido sem assunto vai para Operações
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: sid, event: 'PreToolUse', tool_name: 'mcp__Gmail__send_message' }) });
+  st = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body);
+  assert.strictEqual(st.agents.find((a) => a.id === sid).room, 'Follow-up / CRM');
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: 'topico-2', event: 'UserPromptSubmit', topic: 'geral' }) });
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: 'topico-2', event: 'PreToolUse', tool_name: 'Read' }) });
+  st = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body);
+  assert.strictEqual(st.agents.find((a) => a.id === 'topico-2').room, 'Operações');
+  // assunto inventado é descartado
+  await req('POST', '/event', { headers: auth, body: ev({ session_id: 'topico-3', event: 'UserPromptSubmit', topic: '<script>' }) });
+  st = JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body);
+  assert.notStrictEqual(st.agents.find((a) => a.id === 'topico-3').room, '<script>');
+});
+
+test('uso pelo hook: soma o histórico da sessão e não conta duas vezes com a barra de status', async () => {
+  const { usageFromTranscript } = require(path.join(ROOT, 'hook.js'));
+  const f = path.join(os.tmpdir(), 'ao-transcript-' + process.pid + '.jsonl');
+  const line = (id, i, o, cr) => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: i, cache_creation_input_tokens: cr, cache_read_input_tokens: 999, output_tokens: o } } });
+  fs.writeFileSync(f, [line('m1', 10, 5, 100), line('m1', 10, 5, 100), JSON.stringify({ type: 'user', message: { content: 'privado' } }), line('m2', 20, 7, 0)].join('\n'));
+  const u = usageFromTranscript(f);
+  fs.unlinkSync(f);
+  assert.deepStrictEqual(u, { input_tokens: 130, output_tokens: 12, cache_read_tokens: 1998 });
+  const cookie = await login();
+  const today = async () => JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body).usage.today;
+  const t0 = await today();
+  await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', source: 'hook', input_tokens: 500, output_tokens: 50 }) });
+  const t1 = await today();
+  assert.strictEqual(t1.input - t0.input, 500);
+  // a mesma sessão com barra de status: os números do hook deixam de contar
+  await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', input_tokens: 520, output_tokens: 60 }) });
+  await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', source: 'hook', input_tokens: 9000, output_tokens: 900 }) });
+  const t2 = await today();
+  assert.strictEqual(t2.input - t0.input, 520);
+});
+
+test('3D: three.js e office3d.js exigem login e vêm comprimidos', async () => {
+  assert.strictEqual((await req('GET', '/vendor/three.min.js')).status, 401);
+  const cookie = await login();
+  const r = await req('GET', '/vendor/three.min.js', { headers: { Cookie: cookie, 'Accept-Encoding': 'gzip' } });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.headers['content-encoding'], 'gzip');
+  assert.strictEqual((await req('GET', '/office3d.js', { headers: { Cookie: cookie } })).status, 200);
+  // hook da nuvem: só com o token do hook
+  assert.strictEqual((await req('GET', '/nuvem-hook.js')).status, 401);
+  const h = await req('GET', '/nuvem-hook.js', { headers: auth });
+  assert.strictEqual(h.status, 200);
+  assert.ok(h.body.includes('topicOf') && !h.body.includes(TOKEN));
 });

@@ -12,7 +12,8 @@
   const W = 960, H = 560;                // coordenadas lógicas
   const TW = 44, TH = 22, S = 3.5, OX = 372, OY = 92, WALL = 40;
   const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d');
+  let ctx = cv.getContext('2d');
+  let O3 = null;                         // escritório 3D (office3d.js), quando o navegador aguenta
   let scale = 1, offX = 0, offY = 0;
   const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -530,7 +531,7 @@
   }
 
   function poof(x, y) {
-    if (reduced) return;
+    if (reduced || O3) return;
     const [sx, sy] = iso(x, y);
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * Math.PI * 2;
@@ -538,7 +539,7 @@
     }
   }
   function confetti(x, y) {
-    if (reduced) return;
+    if (reduced || O3) return;
     const [sx, sy] = iso(x, y);
     const cols = ['#3fb950', '#e3b341', '#4f8cff', '#f778ba', '#ff7b72', '#a371f7'];
     for (let k = 0; k < 26; k++) {
@@ -724,19 +725,26 @@
     return true;
   }
 
+  /** Pose do boneco (a mesma na versão 2D e na 3D). */
+  function poseOf(s) {
+    const a = s.data;
+    const moving = s.path && s.path.length > 0;
+    const busy = a.status === 'trabalhando' || a.status === 'delegando';
+    const atDesk = !moving && s.k < WORKSTATIONS.length && busy && !s.leisure && a.room !== 'Entrada' && a.room !== 'Sala de Jogos';
+    if (moving) return 'walk';
+    if (a.status === 'aguardando') return 'wave';
+    if (atDesk) return 'sit';
+    if (busy) return 'type';
+    if (s.leisure && (a.status === 'ocioso' || a.room === 'Entrada')) return s.leisure.pose;
+    return 'idle';
+  }
   function drawAgent(s, t) {
     if (s.alpha <= 0.01 || !s.data) return;
     const a = s.data;
     const [sx, sy0] = iso(s.x, s.y);
     const moving = s.path && s.path.length > 0;
-    const busy = a.status === 'trabalhando' || a.status === 'delegando';
-    const atDesk = !moving && s.k < WORKSTATIONS.length && busy && !s.leisure && a.room !== 'Entrada' && a.room !== 'Sua mesa / Aprovações' && a.room !== 'Sala de Jogos';
-    let pose = 'idle';
-    if (moving) pose = 'walk';
-    else if (a.status === 'aguardando') pose = 'wave';
-    else if (atDesk) pose = 'sit';
-    else if (busy) pose = 'type';
-    else if (s.leisure && (a.status === 'ocioso' || a.room === 'Entrada')) pose = s.leisure.pose;
+    const pose = poseOf(s);
+    const atDesk = pose === 'sit';
     s.away = moving ? s.awayWalk : atDesk;
     if (!moving && LEISURE.has(pose)) { s.dir = s.leisure.dir; s.away = !!s.leisure.away; }
     const bob = pose === 'idle' && !reduced ? Math.sin(t * 2 + hash(a.id)) * 0.6 : 0;
@@ -835,6 +843,15 @@
     }
 
     if (t - lastSky > 30 || !sk) { lastSky = t; sk = sky(); }
+    if (O3) {
+      const waiting3 = agentList.some((a) => a.status === 'aguardando');
+      try {
+        O3.draw({ t, dt, sprites, agentList, sk, light, litRooms, busySeats, hotIdx: waiting3 ? roomIdx('Sua mesa / Aprovações') : -1, waiting: waiting3, poseOf, roomIdx });
+      } catch (e) { fallback2D(e); }
+      overlays3D(t, sk);
+      requestAnimationFrame(frame);
+      return;
+    }
     const night = 1 - sk.day;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
     const k = scale * view.z;
@@ -1089,6 +1106,67 @@
 
   setTimeout(() => { const h = document.getElementById('hint'); if (h) h.classList.add('off'); }, 8000);
   cv.addEventListener('pointerdown', () => { const h = document.getElementById('hint'); if (h) h.classList.add('off'); }, { once: true });
+
+  // ================================================================ 3D (padrão) ou 2D (?modo-2d, ou se o navegador não aguentar)
+  const modeBtn = document.getElementById('modo');
+  let boardCv = null, clockEl = null, pillEl = null, lastOverlay = -9;
+  function fallback2D(err) {
+    if (!O3) return;
+    try { console.warn('[3D] voltando para 2D:', err); } catch (e) { /* nada */ }
+    try { O3.canvas.remove(); } catch (e) { /* nada */ }
+    O3 = null; cv.style.display = '';
+    [boardCv, clockEl, pillEl].forEach((n) => { if (n) n.remove(); });
+    if (modeBtn) modeBtn.hidden = true;
+    resize();
+  }
+  function overlays3D(t, sk) {
+    if (t - lastOverlay < 1) return;
+    lastOverlay = t;
+    if (clockEl) clockEl.textContent = `${sk.txt} · ${sk.label} (UTC-4)`;
+    if (!boardCv) return;
+    // celular: etiqueta pequena no lugar do quadro (toque abre os detalhes)
+    const small = window.innerWidth < 640;
+    boardCv.style.display = small ? 'none' : ''; pillEl.style.display = small ? '' : 'none';
+    if (small) {
+      const u = USAGE, pc = (l) => (l ? Math.round(l.used_percentage) + '%' : '—');
+      pillEl.textContent = u && u.updated ? `Uso · hoje ${fmtTok(u.today.input + u.today.output)} · 5h ${pc(u.five_hour)} · sem. ${pc(u.seven_day)}` : 'Uso do Claude ›';
+      return;
+    }
+    // o quadro de uso é o mesmo desenho da versão 2D, num canvas pequeno no canto
+    const dpr = Math.min(2, window.devicePixelRatio || 1), k = window.innerWidth < 640 ? 0.78 : 1;
+    const w = Math.round(BOARD.w * k), h = Math.round(BOARD.h * k);
+    if (boardCv.width !== w * dpr) { boardCv.width = w * dpr; boardCv.height = h * dpr; boardCv.style.width = w + 'px'; boardCv.style.height = h + 'px'; }
+    const bctx = boardCv.getContext('2d'), main2d = ctx;
+    bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, boardCv.width, boardCv.height);
+    bctx.setTransform(dpr * k, 0, 0, dpr * k, -BOARD.x * dpr * k, -BOARD.y * dpr * k);
+    ctx = bctx;
+    try { drawUsageBoard(); } finally { ctx = main2d; }
+  }
+  function start3D() {
+    if (QS.has('modo-2d') || !window.Office3D || !window.Office3D.supported()) return false;
+    try {
+      O3 = window.Office3D.create({
+        stage: document.getElementById('stage'),
+        cfg: { ROOMS, WORKSTATIONS, GAME_SLOTS, WAIT_SLOTS, S, roomOrigin, dispName },
+        lowPower: QS.has('modo-leve'),
+        onTap: (x, z) => { const i = roomAtPoint(x, z); if (i < 0) closeCard(); else openCard(ROOMS[i]); },
+        onInteract: () => { const h = document.getElementById('hint'); if (h) h.classList.add('off'); },
+      });
+    } catch (e) { O3 = null; return false; }
+    cv.style.display = 'none';
+    boardCv = document.createElement('canvas');
+    boardCv.id = 'board3d'; boardCv.title = 'Uso do Claude: toque para ver os detalhes';
+    boardCv.addEventListener('click', openUsageCard);
+    clockEl = el('div', null, ''); clockEl.id = 'clock3d';
+    pillEl = el('button', null, 'Uso do Claude ›'); pillEl.id = 'pill3d'; pillEl.type = 'button'; pillEl.addEventListener('click', openUsageCard);
+    const st = document.getElementById('stage'); st.append(boardCv, clockEl, pillEl);
+    const h = document.getElementById('hint'); if (h) h.textContent = 'Arraste para girar · dois dedos (ou botão direito) movem · pinça/roda dá zoom · toque numa sala · duplo toque volta';
+    return true;
+  }
+  const is3D = start3D();
+  if (modeBtn) { modeBtn.textContent = is3D ? 'Ver em 2D' : 'Ver em 3D'; modeBtn.href = is3D ? '/?modo-2d' : '/'; if (!is3D && QS.has('modo-2d') === false) modeBtn.hidden = true; }
+  let lastRooms = ROOMS.join('|');
+  setInterval(() => { if (O3 && ROOMS.join('|') !== lastRooms) { lastRooms = ROOMS.join('|'); O3.rebuild(); } }, 2000);
 
   resize();
   connect();

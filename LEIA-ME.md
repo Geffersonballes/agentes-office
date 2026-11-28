@@ -19,6 +19,19 @@ Node.js puro, **sem dependências**. Funciona de dois jeitos:
 | `rooms.example.json` | Exemplo para personalizar as palavras de cada sala (copie para `rooms.json`) |
 | `test/test.js` | Testes automáticos (`npm test`) |
 
+## Escritório em 3D
+
+O painel abre em **3D** (WebGL, com a biblioteca three.js, licença MIT, em `public/vendor/`): baias com divisórias, monitores, gaveteiros, estantes, plantas, janelas e bonecos articulados que andam, sentam, digitam e jogam.
+
+- **Arrastar** gira a câmera · **dois dedos** ou **botão direito** movem · **pinça** ou **roda do mouse** dão zoom · **toque numa sala** mostra quem passou · **toque duplo** volta à vista inicial. No controle da TV: setas giram, `+`/`-` dão zoom, `0` volta.
+- **Ver em 2D** (botão no topo ou `/?modo-2d`): a versão anterior, mais leve.
+- `/?modo-leve`: 3D sem sombras, para aparelhos fracos (TVs já entram assim sozinhas).
+- Se o navegador não tiver WebGL, o painel abre em 2D automaticamente.
+
+## Em que sala cada agente fica
+
+O hook lê o seu pedido **no próprio computador** e manda **só o nome da sala** do assunto (ex.: "Copy", "Tráfego"); o texto do pedido nunca sai do PC. O agente fica nessa sala enquanto trabalha, mesmo usando Bash, Read ou Edit. Ferramentas de serviços (Gmail, Canva, anúncios…) puxam para a sala do serviço. Pedido sem assunto claro vai para **Operações**. As palavras de cada assunto estão em `TOPICS`, no `hook.js`.
+
 ## Nomes dos agentes
 
 Cada agente aparece com a **função** da sala onde está trabalhando (Desenvolvedor, Copywriter, Gestor de Tráfego, Vendedor…) e uma frase do que está fazendo (editando arquivo, rodando comando, pesquisando na web, usando canva…). Subagentes usam o tipo informado pelo Claude Code (Explorador, Planejador, Assistente geral). O código curto (`#6abf`) diferencia sessões. As funções ficam nos mapas `ROLE` e `SUBROLE` do `server.js`.
@@ -32,6 +45,8 @@ Esses dados vêm da **barra de status** do Claude Code (`statusline.js`), o úni
 **Economia do context-mode.** Se o plugin [context-mode](https://github.com/mksglu/context-mode) estiver instalado no PC, o `statusline.js` também lê, só para leitura, os bancos dele (`~/.context-mode/projects/*/context.db`, Node 22.13+ ou 24) e soma como o `ctx_stats`: bytes que as ferramentas produziram × bytes que voltaram para a conversa. O quadro mostra os tokens poupados hoje, na semana e no total (4 bytes ≈ 1 token) e a % que ficou fora da conversa. Só os totais saem do PC; o conteúdo dos bancos nunca é enviado.
 
 Observações: a Anthropic não tem limite diário (só 5 horas e semanal); os limites só aparecem em planos Pro/Max e depois da primeira resposta da sessão; os totais ficam na memória do servidor e zeram quando ele reinicia.
+
+**Sessões na nuvem** não têm barra de status: nelas, o hook soma, ao fim de cada resposta, os tokens do histórico da sessão e manda só os números (`POST /usage` com `source: "hook"`). Os limites de 5 h e semanal só chegam pela barra de status do PC. Se a mesma sessão manda pelos dois caminhos, vale a barra de status (não conta duas vezes). O hook da nuvem é baixado pelo script do ambiente em `GET /nuvem-hook.js` (exige o token do hook).
 
 ## Segurança
 
