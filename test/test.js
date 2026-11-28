@@ -388,21 +388,26 @@ test('uso pelo hook: soma o histórico da sessão e não conta duas vezes com a 
   const { usageFromTranscript } = require(path.join(ROOT, 'hook.js'));
   const f = path.join(os.tmpdir(), 'ao-transcript-' + process.pid + '.jsonl');
   const line = (id, i, o, cr) => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: i, cache_creation_input_tokens: cr, cache_read_input_tokens: 999, output_tokens: o } } });
-  fs.writeFileSync(f, [line('m1', 10, 5, 100), line('m1', 10, 5, 100), JSON.stringify({ type: 'user', message: { content: 'privado' } }), line('m2', 20, 7, 0)].join('\n'));
+  fs.writeFileSync(f, [line('msg_01', 10, 5, 100), line('msg_01', 10, 5, 100), JSON.stringify({ type: 'user', message: { content: 'privado' } }), line('msg_02', 20, 7, 0)].join('\n') + '\n');
   const u = usageFromTranscript(f);
   fs.unlinkSync(f);
-  assert.deepStrictEqual(u, { input_tokens: 130, output_tokens: 12, cache_read_tokens: 1998 });
+  assert.strictEqual(u.input_tokens, 130); assert.strictEqual(u.output_tokens, 12); assert.strictEqual(u.cache_read_tokens, 1998);
+  assert.deepStrictEqual(u.today, { input: 130, output: 12 });          // sem horário nas linhas: conta como hoje
   const cookie = await login();
   const today = async () => JSON.parse((await req('GET', '/state', { headers: { Cookie: cookie } })).body).usage.today;
   const t0 = await today();
   await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', source: 'hook', input_tokens: 500, output_tokens: 50 }) });
-  const t1 = await today();
+  let t1 = await today();
   assert.strictEqual(t1.input - t0.input, 500);
+  // com hoje/semana separados pelo hook, o quadro usa esses números (não o total da sessão)
+  await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-2', source: 'hook', input_tokens: 90000, output_tokens: 900, today: { input: 300, output: 30 }, week: { input: 4000, output: 400 } }) });
+  t1 = await today();
+  assert.strictEqual(t1.input - t0.input, 800);
   // a mesma sessão com barra de status: os números do hook deixam de contar
   await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', input_tokens: 520, output_tokens: 60 }) });
   await req('POST', '/usage', { headers: auth, body: JSON.stringify({ session_id: 'nuvem-1', source: 'hook', input_tokens: 9000, output_tokens: 900 }) });
   const t2 = await today();
-  assert.strictEqual(t2.input - t0.input, 520);
+  assert.strictEqual(t2.input - t0.input, 820);
 });
 
 test('3D: three.js e office3d.js exigem login e vêm comprimidos', async () => {

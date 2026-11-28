@@ -73,28 +73,65 @@ function topicOf(text) {
   return best;
 }
 
-/** Soma, a partir do histórico da sessão (arquivo local), os tokens gastos. Só números saem daqui. */
+/**
+ * Soma, a partir do histórico da sessão (arquivo local), os tokens gastos. Só números saem daqui.
+ * Lê só o pedaço novo do arquivo a cada vez (guarda onde parou), no máximo 16 MB por chamada,
+ * para nunca atrasar o Claude Code mesmo em sessões com históricos enormes.
+ */
 function usageFromTranscript(file) {
   try {
-    const fs = require('fs');
+    const fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto');
     const st = fs.statSync(file);
-    if (!st.isFile() || st.size > 40 * 1024 * 1024) return null;
-    const seen = new Set();
-    let input = 0, output = 0, read = 0;
-    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-      if (line.indexOf('"usage"') < 0) continue;
-      let j; try { j = JSON.parse(line); } catch { continue; }
-      const m = j && j.message;
-      if (!m || !m.usage || j.type !== 'assistant') continue;
-      const id = m.id || j.uuid;
-      if (id && seen.has(id)) continue;
-      if (id) seen.add(id);
-      const u = m.usage;
-      input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      read += u.cache_read_input_tokens || 0;
-      output += u.output_tokens || 0;
+    if (!st.isFile()) return null;
+    const stFile = path.join(os.tmpdir(), 'agentes-office-uso-' + crypto.createHash('sha1').update(file).digest('hex').slice(0, 16) + '.json');
+    const fresh = () => ({ off: 0, input: 0, output: 0, read: 0, lastId: '', days: {} });
+    let S = fresh();
+    try { S = Object.assign(S, JSON.parse(fs.readFileSync(stFile, 'utf8'))); } catch { /* primeira vez */ }
+    if (st.size < S.off) S = fresh();   // arquivo novo/recomeçado
+    // dia (UTC-4) de cada mensagem, para o quadro separar "hoje" e "semana"
+    const OFF4 = 4 * 3600e3, dayOf = (ms) => new Date(ms - OFF4).toISOString().slice(0, 10);
+    const MAX = 16 * 1024 * 1024, len = Math.min(MAX, st.size - S.off);
+    if (len > 0) {
+      const buf = Buffer.alloc(len), fd = fs.openSync(file, 'r');
+      try { fs.readSync(fd, buf, 0, len, S.off); } finally { fs.closeSync(fd); }
+      const end = buf.lastIndexOf(10);                 // só linhas completas
+      if (end >= 0) {
+        const text = buf.toString('utf8', 0, end + 1);
+        const num = (seg, k) => { const m = new RegExp('"' + k + '":(\\d+)').exec(seg); return m ? Number(m[1]) : 0; };
+        let pos = 0;
+        while (pos < text.length) {
+          let nl = text.indexOf('\n', pos); if (nl < 0) nl = text.length;
+          const u = text.indexOf('"usage":{', pos);
+          if (u >= 0 && u < nl) {
+            const ty = text.indexOf('"type":"assistant"', pos);   // a ordem dos campos varia: procura na linha toda
+            if (ty >= pos && ty < nl) {
+              const idm = /"id":"(msg_[A-Za-z0-9]+)"/.exec(text.slice(pos, u));
+              const id = idm ? idm[1] : '';
+              if (!id || id !== S.lastId) {
+                const seg = text.slice(u, Math.min(nl, u + 900));
+                const iT = num(seg, 'input_tokens') + num(seg, 'cache_creation_input_tokens'), oT = num(seg, 'output_tokens');
+                S.input += iT; S.output += oT;
+                S.read += num(seg, 'cache_read_input_tokens');
+                const tsm = /"timestamp":"([0-9T:.\-]+Z)"/.exec(text.slice(pos, nl));
+                const d = dayOf(tsm ? Date.parse(tsm[1]) || Date.now() : Date.now());
+                const b = S.days[d] || (S.days[d] = [0, 0]); b[0] += iT; b[1] += oT;
+              }
+              if (id) S.lastId = id;
+            }
+          }
+          pos = nl + 1;
+        }
+        S.off += Buffer.byteLength(text, 'utf8');
+      }
+      const keep = Object.keys(S.days).sort().slice(-15); const nd = {}; keep.forEach((k) => { nd[k] = S.days[k]; }); S.days = nd;
+      try { fs.writeFileSync(stFile, JSON.stringify(S)); } catch { /* sem cache */ }
     }
-    return { input_tokens: input, output_tokens: output, cache_read_tokens: read };
+    // hoje e semana (desde segunda), em UTC-4
+    const now = Date.now(), today = dayOf(now), dow = (new Date(now - OFF4).getUTCDay() + 6) % 7, monday = dayOf(now - dow * 864e5);
+    const sum = (f) => Object.keys(S.days).filter(f).reduce((a, k) => [a[0] + S.days[k][0], a[1] + S.days[k][1]], [0, 0]);
+    const td = sum((k) => k === today), wk = sum((k) => k >= monday);
+    return { input_tokens: S.input, output_tokens: S.output, cache_read_tokens: S.read,
+      today: { input: td[0], output: td[1] }, week: { input: wk[0], output: wk[1] } };
   } catch { return null; }
 }
 

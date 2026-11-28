@@ -700,6 +700,47 @@
         c.globalCompositeOperation = 'source-over';
       });
     }
+    // letreiro de LED: letras feitas de pontinhos acesos + brilho na parede (mais forte com a sala em uso e à noite)
+    var leds = [];
+    function ledTexs(text, color) {
+      var W = 1024, H = 192, mask = document.createElement('canvas'); mask.width = W; mask.height = H;
+      var m = mask.getContext('2d'), size = 128;
+      var font = function (z) { return '900 ' + z + 'px system-ui, \"Segoe UI\", sans-serif'; };
+      m.font = font(size); while (m.measureText(text).width > W - 60 && size > 40) { size -= 4; m.font = font(size); }
+      m.textAlign = 'center'; m.textBaseline = 'middle'; m.fillStyle = '#fff'; m.fillText(text, W / 2, H / 2 + 6);
+      var data = m.getImageData(0, 0, W, H).data, step = 9, r = 3.7;
+      var lit = new T.Color(color).getStyle(), hi = new T.Color(color).lerp(new T.Color('#ffffff'), 0.6).getStyle();
+      var on = function (x, y) { return data[((y | 0) * W + (x | 0)) * 4 + 3] >= 110; };
+      var dots = canvasTex(W, H, function (c) {
+        c.clearRect(0, 0, W, H);
+        var x, y;
+        // soquete escuro em volta de cada LED (aparece em qualquer parede, de dia também)
+        c.fillStyle = 'rgba(18,20,24,.92)';
+        for (y = step / 2; y < H; y += step) for (x = step / 2; x < W; x += step) if (on(x, y)) { c.beginPath(); c.arc(x, y, r + 1.2, 0, 6.3); c.fill(); }
+        // LED aceso: cor da sala com o centro mais claro
+        for (y = step / 2; y < H; y += step) for (x = step / 2; x < W; x += step) {
+          if (!on(x, y)) continue;
+          c.fillStyle = lit; c.beginPath(); c.arc(x, y, r, 0, 6.3); c.fill();
+          c.fillStyle = hi; c.beginPath(); c.arc(x - 0.6, y - 0.6, r * 0.45, 0, 6.3); c.fill();
+        }
+      });
+      var glow = canvasTex(W / 4, H / 4, function (c, w, h) {
+        c.clearRect(0, 0, w, h); c.filter = 'blur(6px)';
+        c.drawImage(mask, 0, 0, w, h);
+        c.globalCompositeOperation = 'source-in'; c.filter = 'none'; c.fillStyle = color; c.fillRect(0, 0, w, h);
+      });
+      return { dots: dots, glow: glow };
+    }
+    function ledSign(parent, text, color, w, h, x, y, z, rotY) {
+      var tx = ledTexs(text, color), g = new T.Group();
+      var gm = new T.MeshBasicMaterial({ map: tx.glow, transparent: true, opacity: 0.5, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false });
+      var halo = new T.Mesh(new T.PlaneGeometry(w * 1.08, h * 1.5), gm); halo.position.z = 0.001; g.add(halo);
+      var dm = new T.MeshBasicMaterial({ map: tx.dots, transparent: true, depthWrite: false, toneMapped: false });
+      var letters = new T.Mesh(new T.PlaneGeometry(w, h), dm); letters.position.z = 0.003; g.add(letters);
+      g.position.set(x, y, z); g.rotation.y = rotY || 0; parent.add(g);
+      var L = { glow: gm, dots: dm, room: -1, ph: Math.random() * 6 }; leds.push(L);
+      return L;
+    }
     function paintSign(parent, text, color, w, h, x, y, z, rotY) {
       var m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshLambertMaterial({ map: paintTex(text, color), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
       m.position.set(x, y, z); m.rotation.y = rotY || 0; m.receiveShadow = shadows; parent.add(m); return m;
@@ -739,7 +780,7 @@
     function buildRooms(list) {
       if (Array.isArray(list) && list.length) cfg.ROOMS = list.slice();
       for (var r = 0; r < rooms.length; r++) world.remove(rooms[r].g);
-      rooms = []; monitors = [];
+      rooms = []; monitors = []; leds = [];
       cfg.ROOMS.forEach(function (name, i) {
         var og = cfg.roomOrigin(i);
         var g = new T.Group(); g.position.set(og.gx, 0, og.gy); world.add(g);
@@ -782,7 +823,8 @@
         B(g, M('#c9ccd0'), 0.03, 0.64, 0.26, 0.09, 0.66, 2.14, true);          // peitoril
         }
         // placa com o nome da sala na parede do fundo
-        var sign = paintSign(g, cfg.dispName(name), mix(accent, '#000000', 0.45), 2.5, 0.36, S / 2, 1.06, 0.004, 0);
+        var sign = ledSign(g, cfg.dispName(name), new T.Color(accent).offsetHSL(0, 0.15, 0.05).getStyle(), 2.5, 0.36, S / 2, 1.06, 0.004, 0);
+        sign.room = i;
         var R = { g: g, floorMat: floorMat, wallMat: wallMat, featMat: featMat, floorBase: floorBase, wallBase: wallBase, featBase: featBase,
           anim: [], name: name, i: i, sign: sign, pal: pal };
         rooms.push(R);
@@ -818,8 +860,8 @@
       });
       // placa "Lounge" no alto
       B(loungeG, M('#fff3e0'), x0, 0.96, z0 - 0.05, x1, 1.16, z0, true); B(loungeG, M('#fff3e0'), x0, 0.96, z1, x1, 1.16, z1 + 0.05, true);   // faixa de parede para a pintura
-      var sg = paintSign(loungeG, 'Lounge', '#e64a19', 1.3, 0.2, (x0 + x1) / 2, 1.06, z0 - 0.052, Math.PI);
-      var sg2 = paintSign(loungeG, 'Lounge', '#e64a19', 1.3, 0.2, (x0 + x1) / 2, 1.06, z1 + 0.052, 0);
+      var sg = ledSign(loungeG, 'Lounge', '#ff7043', 1.3, 0.2, (x0 + x1) / 2, 1.06, z0 - 0.052, Math.PI);
+      var sg2 = ledSign(loungeG, 'Lounge', '#ff7043', 1.3, 0.2, (x0 + x1) / 2, 1.06, z1 + 0.052, 0);
       void sg2;
       B(loungeG, M('#5d4037'), x0, 0.95, z0 - 0.05, x0 + 0.04, 1.18, z1 + 0.05, true); B(loungeG, M('#5d4037'), x1 - 0.04, 0.95, z0 - 0.05, x1, 1.18, z1 + 0.05, true);
       B(loungeG, M('#5d4037'), x0, 1.16, z0 - 0.05, x1, 1.2, z0, true); B(loungeG, M('#5d4037'), x0, 1.16, z1, x1, 1.2, z1 + 0.05, true);
@@ -1398,6 +1440,13 @@
         R.wallMat.emissive.setRGB(em * 0.6, em * 0.5, em * 0.35); R.featMat.emissive.copy(R.wallMat.emissive);
         var rst = { lit: lit, waiting: st.waiting && hot, playing: playing };
         for (var a = 0; a < R.anim.length; a++) R.anim[a](t, rst);
+        R.busyLed = L > 0.9 || hot;
+      });
+      leds.forEach(function (L) {
+        var R2 = L.room >= 0 ? rooms[L.room] : null, on = !R2 || R2.busyLed;
+        var pulse = 0.92 + 0.08 * Math.sin(t * 2.2 + L.ph);
+        L.dots.opacity = (on ? 1 : 0.78) * pulse;
+        L.glow.opacity = (on ? 0.06 + 0.34 * night : 0.02 + 0.16 * night) * pulse;
       });
       monitors.forEach(function (m) { m.mesh.material = st.litRooms.has(m.room) && (st.busySeats.get(m.room) || 0) > m.k ? screenOn : screenOff; });
 

@@ -291,7 +291,9 @@ function sanitizeUsage(raw) {
   const machine = typeof raw.machine === 'string' && /^[a-f0-9]{6,32}$/.test(raw.machine) ? raw.machine : null;
   const list = (arr, max, re) => (Array.isArray(arr) ? arr.slice(0, max).filter((x) => x && typeof x.name === 'string' && re.test(x.name))
     .map((x) => Object.assign({ name: x.name }, scope(x))) : []);
-  return { session_id: sid, source: raw.source === 'hook' ? 'hook' : 'statusline', input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
+  const io = (o) => (o && typeof o === 'object' && num(o.input, 1e12) !== null && num(o.output, 1e12) !== null ? { input: num(o.input, 1e12), output: num(o.output, 1e12) } : null);
+  return { session_id: sid, source: raw.source === 'hook' ? 'hook' : 'statusline', hookToday: io(raw.today), hookWeek: io(raw.week),
+    input: num(raw.input_tokens, 1e12), output: num(raw.output_tokens, 1e12),
     cost: num(raw.cost_usd, 1e7), five_hour: lim(raw.five_hour), seven_day: lim(raw.seven_day),
     ctx: cm && machine ? { machine, all: scope(cm.all), today: scope(cm.today), week: scope(cm.week), session: scope(cm.session),
       tools: list(cm.tools, 15, /^[A-Za-z0-9_.:\-]{1,80}$/), kinds: list(cm.kinds, 8, /^(prompt|edit|cmd|toolerr|index|decision|\?)$/) } : null };
@@ -307,6 +309,11 @@ function applyUsage(u) {
   const fromHook = u.source === 'hook';
   if (!fromHook && r.src === 'hook') { r.src = 'statusline'; r.input = u.input === null ? r.input : u.input; r.output = u.output === null ? r.output : u.output; }
   if (!r.src) r.src = u.source;
+  if (fromHook && r.src !== 'statusline') {
+    // o hook já manda hoje e semana separados (pelo horário de cada mensagem): usa direto
+    if (u.hookToday) r.hd = Object.assign({ key: day }, u.hookToday);
+    if (u.hookWeek) r.hw = Object.assign({ key: week }, u.hookWeek);
+  }
   if (fromHook && r.src === 'statusline') { /* ignora */ }
   // os totais da sessão só crescem; se diminuírem, a sessão foi reiniciada
   else if (u.input !== null && u.output !== null) {
@@ -326,6 +333,11 @@ function usageSummary() {
   const now = Date.now(), day = dayKey(now), week = weekKey(now);
   const out = { today: { input: 0, output: 0, cost: 0 }, week: { input: 0, output: 0, cost: 0 }, sessions_today: 0 };
   for (const r of usage.sessions.values()) {
+    if (r.src === 'hook' && (r.hd || r.hw)) {
+      if (r.hd && r.hd.key === day && (r.hd.input || r.hd.output)) { out.today.input += r.hd.input; out.today.output += r.hd.output; out.sessions_today++; }
+      if (r.hw && r.hw.key === week) { out.week.input += r.hw.input; out.week.output += r.hw.output; }
+      continue;
+    }
     if (r.day === day) { out.today.input += r.input - r.dIn; out.today.output += r.output - r.dOut; out.today.cost += (r.cost || 0) - (r.dCost || 0); out.sessions_today++; }
     if (r.week === week) { out.week.input += r.input - r.wIn; out.week.output += r.output - r.wOut; out.week.cost += (r.cost || 0) - (r.wCost || 0); }
   }
