@@ -370,14 +370,24 @@
         }
       });
     }
-    function signTex(text, accent) {
-      return canvasTex(512, 96, function (c, w, h) {
-        c.fillStyle = '#1d2228'; rr(c, 0, 0, w, h, 14); c.fill();
-        c.fillStyle = accent; c.fillRect(0, 0, 14, h);
-        c.fillStyle = '#f2f4f6'; c.font = 'bold 46px system-ui, sans-serif'; c.textBaseline = 'middle';
-        var t = text; while (c.measureText(t).width > w - 60 && t.length > 4) t = t.slice(0, -2);
-        c.fillText(t === text ? t : t + '…', 34, h / 2 + 2);
+    // nome "pintado" na parede: sem fundo, letras na cor da sala, com textura leve de tinta
+    function paintTex(text, color) {
+      return canvasTex(1024, 160, function (c, w, h) {
+        c.clearRect(0, 0, w, h);
+        var size = 112, font = function (z) { return '800 ' + z + 'px system-ui, \"Segoe UI\", sans-serif'; };
+        c.font = font(size);
+        while (c.measureText(text).width > w - 40 && size > 40) { size -= 4; c.font = font(size); }
+        c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillStyle = color; c.fillText(text, w / 2, h / 2 + 4);
+        // tinta: falhas pequenas e bordas levemente irregulares
+        c.globalCompositeOperation = 'destination-out';
+        for (var k = 0; k < 1400; k++) { c.fillStyle = 'rgba(0,0,0,' + (0.12 + ((k * 37) % 10) / 40) + ')'; c.fillRect((k * 131) % w, (k * 71 + (k >> 3)) % h, 2, 2); }
+        c.globalCompositeOperation = 'source-over';
       });
+    }
+    function paintSign(parent, text, color, w, h, x, y, z, rotY) {
+      var m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshLambertMaterial({ map: paintTex(text, color), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+      m.position.set(x, y, z); m.rotation.y = rotY || 0; m.receiveShadow = shadows; parent.add(m); return m;
     }
 
     // ---------------------------------------------------------------- prédio
@@ -457,7 +467,7 @@
         B(g, M('#c9ccd0'), 0.03, 0.64, 0.26, 0.09, 0.66, 2.14, true);          // peitoril
         }
         // placa com o nome da sala na parede do fundo
-        var sign = planeTex(g, signTex(cfg.dispName(name), accent), 1.7, 0.32, S / 2, 1.1, 0.012, 0, true);
+        var sign = paintSign(g, cfg.dispName(name), mix(accent, '#000000', 0.45), 2.5, 0.36, S / 2, 1.06, 0.004, 0);
         var R = { g: g, floorMat: floorMat, wallMat: wallMat, featMat: featMat, floorBase: floorBase, wallBase: wallBase, featBase: featBase,
           anim: [], name: name, i: i, sign: sign, pal: pal };
         rooms.push(R);
@@ -492,9 +502,9 @@
         B(loungeG, M('#ff7043'), x0, 0.85, z, x1, 0.9, z + 0.04, true);
       });
       // placa "Lounge" no alto
-      var sg = planeTex(loungeG, signTex('Lounge', '#ff7043'), 1.2, 0.22, (x0 + x1) / 2, 1.05, z0 - 0.02, 0, true);
-      sg.rotation.y = 0;
-      var sg2 = planeTex(loungeG, signTex('Lounge', '#ff7043'), 1.2, 0.22, (x0 + x1) / 2, 1.05, z1 + 0.06, Math.PI, true);
+      B(loungeG, M('#fff3e0'), x0, 0.96, z0 - 0.05, x1, 1.16, z0, true); B(loungeG, M('#fff3e0'), x0, 0.96, z1, x1, 1.16, z1 + 0.05, true);   // faixa de parede para a pintura
+      var sg = paintSign(loungeG, 'Lounge', '#e64a19', 1.3, 0.2, (x0 + x1) / 2, 1.06, z0 - 0.052, Math.PI);
+      var sg2 = paintSign(loungeG, 'Lounge', '#e64a19', 1.3, 0.2, (x0 + x1) / 2, 1.06, z1 + 0.052, 0);
       void sg2;
       B(loungeG, M('#5d4037'), x0, 0.95, z0 - 0.05, x0 + 0.04, 1.18, z1 + 0.05, true); B(loungeG, M('#5d4037'), x1 - 0.04, 0.95, z0 - 0.05, x1, 1.18, z1 + 0.05, true);
       B(loungeG, M('#5d4037'), x0, 1.16, z0 - 0.05, x1, 1.2, z0, true); B(loungeG, M('#5d4037'), x0, 1.16, z1, x1, 1.2, z1 + 0.05, true);
