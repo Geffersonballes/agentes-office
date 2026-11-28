@@ -776,10 +776,11 @@
       var mixer = new T.AnimationMixer(ch), acts = {};
       g.animations.forEach(function (c) { acts[c.name.replace(/^(Man|Female)_/, '')] = mixer.clipAction(c); });
       var bones = {}; ch.traverse(function (x) { if (x.isBone) bones[x.name] = x; });
-      // pose de descanso dos braços: recolocada a cada quadro antes da animação (se a animação não mexe neles, o ajuste não acumula)
-      var rest = {};
-      ['UpperArmR', 'UpperArmL'].forEach(function (n) { if (bones[n]) rest[n] = bones[n].quaternion.clone(); });
-      var P = { root: root, body: body, h: h, model: true, mixer: mixer, acts: acts, bones: bones, rest: rest, cur: null };
+      // pose que a animação deu a cada osso do braço. O three.js só reescreve o osso quando o valor muda;
+      // por isso guardamos a pose da animação e aplicamos o ajuste sempre em cima dela (sem acumular)
+      var base = {}, out = {};
+      ['UpperArmR', 'UpperArmL', 'LowerArmR', 'LowerArmL'].forEach(function (n) { if (bones[n]) { base[n] = bones[n].quaternion.clone(); out[n] = null; } });
+      var P = { root: root, body: body, h: h, model: true, mixer: mixer, acts: acts, bones: bones, base: base, out: out, cur: null };
       // objetos na mão direita (compensando a escala do esqueleto)
       var hand = bones.PalmR || bones.LowerArmR;
       var holder = new T.Group();
@@ -894,24 +895,36 @@
         P.cur = clip;
       }
       if (P.acts.Walk) P.acts.Walk.timeScale = 1.45;
-      for (var rn in P.rest) P.bones[rn].quaternion.copy(P.rest[rn]);
       P.mixer.update(dt);
-      // braços por cima da animação: digitar, celular, revista, controle, raquete, dardo, café
-      var zr = 0, zl = 0, w = Math.sin(t * 13 + P.h), w2 = Math.sin(t * 12 + P.h + 1.7);
+      for (var bk in P.base) {
+        var bq = P.bones[bk].quaternion;
+        if (!P.out[bk] || !bq.equals(P.out[bk])) P.base[bk].copy(bq);      // a animação escreveu um valor novo
+        bq.copy(P.base[bk]);
+      }
+      // braços por cima da animação, dobrando o cotovelo: digitar, celular, revista, controle, raquete, dardo, café
+      // ur/ul = braço (para a frente), fr/fl = antebraço (dobra o cotovelo)
+      var ur = 0, ul = 0, fr = 0, fl = 0, w = Math.sin(t * 13 + P.h), w2 = Math.sin(t * 12 + P.h + 1.7);
       if (!moving) switch (name) {
-        case 'sit': zr = 1.0 + w * 0.07; zl = -(1.0 + w2 * 0.07); break;
-        case 'type': zr = 0.85 + w * 0.06; zl = -0.85; break;
-        case 'phone': zr = 1.55; zl = Math.sin(t * 0.5 + P.h) > 0.6 ? -0.8 : 0; break;
-        case 'magazine': zr = 1.05; zl = -1.05; break;
-        case 'videogame': zr = 0.9 + w * 0.05; zl = -(0.9 + w2 * 0.05); break;
-        case 'chess': case 'cards': zr = Math.sin(t * 0.8 + P.h) > 0.7 ? 1.25 : 0.7; zl = -0.6; break;
-        case 'play': zr = 0.8 + Math.sin(t * 5 + P.h * 0.1) * 0.55; break;
-        case 'darts': zr = ((t * 0.7 + P.h * 0.01) % 1) < 0.7 ? 1.9 : 1.0; break;
-        case 'coffee': zr = Math.sin(t * 0.9 + P.h) > 0.5 ? 1.6 : 0.7; break;
+        case 'sit': ur = 0.45; ul = 0.45; fr = -1.15 + w * 0.08; fl = -1.15 + w2 * 0.08; break;          // mãos no teclado
+        case 'type': ur = 0.5; ul = 0.5; fr = -1.5 + w * 0.05; fl = -1.5; break;                          // tablet no peito
+        case 'phone': ur = 0.3; fr = -2.2; if (Math.sin(t * 0.5 + P.h) > 0.6) { ul = 0.4; fl = -1.3; } break;  // celular no ouvido
+        case 'magazine': ur = 0.45; ul = 0.45; fr = -1.6; fl = -1.6; break;                                // revista aberta
+        case 'videogame': ur = 0.4; ul = 0.4; fr = -1.3 + w * 0.06; fl = -1.3 + w2 * 0.06; break;          // controle
+        case 'chess': case 'cards': {
+          var mv = Math.sin(t * 0.8 + P.h) > 0.7;
+          ur = mv ? 0.75 : 0.45; fr = mv ? -0.6 : -1.1; ul = 0.3; fl = -0.8; break;                        // mexe a peça / segura as cartas
+        }
+        case 'play': ur = 0.85 + Math.sin(t * 5 + P.h * 0.1) * 0.4; fr = -0.7; break;                      // raquete
+        case 'darts': { var th = ((t * 0.7 + P.h * 0.01) % 1) < 0.7; ur = 1.3; fr = th ? -1.6 : -0.3; break; }  // mira e arremessa
+        case 'coffee': ur = 0.3; fr = Math.sin(t * 0.9 + P.h) > 0.5 ? -2.0 : -1.35; break;                  // xícara
         default: break;
       }
-      if (P.bones.UpperArmR && zr) P.bones.UpperArmR.rotation.z += zr;
-      if (P.bones.UpperArmL && zl) P.bones.UpperArmL.rotation.z += zl;
+      var bn = P.bones;
+      if (bn.UpperArmR && ur) bn.UpperArmR.rotation.z += ur;
+      if (bn.UpperArmL && ul) bn.UpperArmL.rotation.z -= ul;
+      if (bn.LowerArmR && fr) bn.LowerArmR.rotation.x += fr;
+      if (bn.LowerArmL && fl) bn.LowerArmL.rotation.x += fl;
+      for (var ok in P.out) P.out[ok] = P.bones[ok].quaternion.clone();
       var jy = P.jump > 0 ? Math.sin((1 - P.jump / 0.9) * Math.PI) * 0.18 : 0;
       var ty = (sit ? SIT_DY + (name === 'videogame' ? -0.04 : 0) : 0) + jy;
       P.body.position.y += (ty - P.body.position.y) * Math.min(1, dt * 10);
