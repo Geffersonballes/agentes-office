@@ -27,12 +27,185 @@
     var k = c + (extra || '');
     return dressMats[k] || (dressMats[k] = new T.MeshLambertMaterial({ color: c, side: extra === 'dupla' ? T.DoubleSide : T.FrontSide }));
   }
-  function strap(parent, mat, a, b, w, d) {
-    var dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    var m = new T.Mesh(new T.BoxGeometry(w, len, d), mat);
-    m.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
-    m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(dx / len, dy / len, dz / len));
-    parent.add(m); return m;
+  // ---- peças "costuradas" no corpo: cada ponto da peça é colado na superfície da roupa e herda os ossos
+  // da pele mais próxima, então dobra junto quando o personagem anda, senta ou mexe os braços.
+  var dressCache = {};
+  function bodyData(meshes) {
+    var key = meshes.map(function (m) { return m.geometry.uuid; }).join('|');
+    if (dressCache[key]) return dressCache[key];
+    var n = 0; meshes.forEach(function (m) { n += m.geometry.attributes.position.count; });
+    var V = new Float32Array(n * 3), SI = new Uint16Array(n * 4), SW = new Float32Array(n * 4), v = new T.Vector3(), o = 0;
+    meshes.forEach(function (mesh) {
+      var g = mesh.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+      mesh.updateMatrixWorld(true);
+      for (var i = 0; i < pos.count; i++, o++) {
+        // posição real na pose de fábrica: passa pelos ossos (nos arquivos comprimidos a escala fica no esqueleto)
+        v.fromBufferAttribute(pos, i); mesh.boneTransform(i, v); v.applyMatrix4(mesh.matrixWorld);
+        V[o * 3] = v.x; V[o * 3 + 1] = v.y; V[o * 3 + 2] = v.z;
+        SI[o * 4] = si.getX(i); SI[o * 4 + 1] = si.getY(i); SI[o * 4 + 2] = si.getZ(i); SI[o * 4 + 3] = si.getW(i);
+        SW[o * 4] = sw.getX(i); SW[o * 4 + 1] = sw.getY(i); SW[o * 4 + 2] = sw.getZ(i); SW[o * 4 + 3] = sw.getW(i);
+      }
+    });
+    var D = { V: V, n: n, SI: SI, SW: SW, mesh: meshes[0], geos: {} };
+    dressCache[key] = D;
+    return D;
+  }
+  // frente (front = true: maior z) ou costas da superfície em (x, y)
+  function surfZ(D, x, y, front, tol, minY) {
+    var V = D.V, best = null;
+    for (var t = tol || 0.012; t < 0.06 && best === null; t *= 1.6) {
+      for (var i = 0; i < D.n; i++) {
+        var vy = V[i * 3 + 1]; if (minY && vy < minY) continue;
+        if (Math.abs(V[i * 3] - x) > t || Math.abs(vy - y) > t) continue;
+        var vz = V[i * 3 + 2];
+        if (best === null || (front ? vz > best : vz < best)) best = vz;
+      }
+    }
+    return best === null ? 0 : best;
+  }
+  // topo do ombro em (x, z), procurando só na faixa do ombro (lo..hi)
+  function topY(D, x, z, lo, hi) {
+    var V = D.V, best = null;
+    for (var t = 0.012; t < 0.05 && best === null; t *= 1.5) {
+      for (var i = 0; i < D.n; i++) {
+        if (Math.abs(V[i * 3] - x) > t || Math.abs(V[i * 3 + 2] - z) > t) continue;
+        var vy = V[i * 3 + 1]; if (vy < lo || vy > hi) continue;
+        if (best === null || vy > best) best = vy;
+      }
+    }
+    return best === null ? lo + 0.02 : best;
+  }
+  function ringR(D, y, th, tol) {
+    var V = D.V, best = 0, dx = Math.sin(th), dz = Math.cos(th);
+    for (var i = 0; i < D.n; i++) {
+      if (Math.abs(V[i * 3 + 1] - y) > (tol || 0.012)) continue;
+      var x = V[i * 3], z = V[i * 3 + 2], r = Math.sqrt(x * x + z * z);
+      if (r > 0.16 || r < 1e-4) continue;
+      if ((x * dx + z * dz) / r < 0.97) continue;              // ~14° em volta da direção
+      if (r > best) best = r;
+    }
+    return best || 0.08;
+  }
+  function nearest(D, x, y, z, minY, maxX) {
+    var V = D.V, bi = 0, bd = 1e9;
+    for (var i = 0; i < D.n; i++) {
+      if (minY && V[i * 3 + 1] < minY) continue;
+      if (maxX && Math.abs(V[i * 3]) > maxX) continue;
+      var a = V[i * 3] - x, b = V[i * 3 + 1] - y, c = V[i * 3 + 2] - z, d = a * a + b * b + c * c; if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  }
+  /** Geometria com pele: pts em coordenadas do corpo; anchor (opcional) usa os ossos de um ponto só (peça rígida). */
+  function skinnedGeo(D, pts, idx, anchor, minY, maxX) {
+    var n = pts.length, P = new Float32Array(n * 3), SI = new Uint16Array(n * 4), SW = new Float32Array(n * 4), v = new T.Vector3();
+    var ai = anchor ? nearest(D, anchor[0], anchor[1], anchor[2]) : -1;
+    var mesh = D.mesh, sk = mesh.skeleton, M = new T.Matrix4(), tmp = new T.Matrix4(), full = new T.Matrix4();
+    for (var i = 0; i < n; i++) {
+      var k = ai >= 0 ? ai : nearest(D, pts[i][0], pts[i][1], pts[i][2], minY, maxX);
+      for (var c = 0; c < 4; c++) { SI[i * 4 + c] = D.SI[k * 4 + c]; SW[i * 4 + c] = D.SW[k * 4 + c]; }
+      // inverso da pele: acha o ponto "cru" que, depois dos ossos, cai exatamente onde queremos
+      for (var e = 0; e < 16; e++) M.elements[e] = 0;
+      for (c = 0; c < 4; c++) {
+        var w = SW[i * 4 + c]; if (!w) continue;
+        var b = SI[i * 4 + c];
+        tmp.multiplyMatrices(sk.bones[b].matrixWorld, sk.boneInverses[b]);
+        for (e = 0; e < 16; e++) M.elements[e] += w * tmp.elements[e];
+      }
+      full.multiplyMatrices(mesh.matrixWorld, mesh.bindMatrixInverse).multiply(M).multiply(mesh.bindMatrix).invert();
+      v.set(pts[i][0], pts[i][1], pts[i][2]).applyMatrix4(full);
+      P[i * 3] = v.x; P[i * 3 + 1] = v.y; P[i * 3 + 2] = v.z;
+    }
+    var g = new T.BufferGeometry();
+    g.setAttribute('position', new T.BufferAttribute(P, 3));
+    g.setAttribute('skinIndex', new T.Uint16BufferAttribute(SI, 4));
+    g.setAttribute('skinWeight', new T.BufferAttribute(SW, 4));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  }
+  // fita ao longo de um caminho (cada ponto com a direção "para fora")
+  function ribbon(path, outs, w) {
+    var pts = [], idx = [];
+    for (var i = 0; i < path.length; i++) {
+      var p = path[i], q = path[Math.min(path.length - 1, i + 1)], r = path[Math.max(0, i - 1)];
+      var t = new T.Vector3(q[0] - r[0], q[1] - r[1], q[2] - r[2]).normalize(), o = new T.Vector3(outs[i][0], outs[i][1], outs[i][2]).normalize();
+      var sd = new T.Vector3().crossVectors(t, o).normalize().multiplyScalar(w / 2);
+      pts.push([p[0] + sd.x, p[1] + sd.y, p[2] + sd.z], [p[0] - sd.x, p[1] - sd.y, p[2] - sd.z]);
+      if (i) { var a = (i - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+    return { pts: pts, idx: idx };
+  }
+  function boxPts(cx, cy, cz, w, h, d) {
+    var pts = [], idx = [], x = w / 2, y = h / 2, z = d / 2;
+    [[-x, -y, -z], [x, -y, -z], [x, y, -z], [-x, y, -z], [-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]].forEach(function (c) { pts.push([cx + c[0], cy + c[1], cz + c[2]]); });
+    idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5];
+    return { pts: pts, idx: idx };
+  }
+  // as peças (geometria) são calculadas uma vez por modelo e reaproveitadas
+  function piece(D, name, build) { return D.geos[name] || (D.geos[name] = build()); }
+  // suaviza a profundidade ao longo da fita: envelope externo (nunca entra na camisa) + média
+  function smoothOut(zs, front) {
+    var n = zs.length, a = zs.slice(), k, r;
+    for (r = 0; r < 2; r++) for (k = 0; k < n; k++) {
+      var p = a[Math.max(0, k - 1)], q = a[Math.min(n - 1, k + 1)];
+      zs[k] = front ? Math.max(p, a[k], q) : Math.min(p, a[k], q);
+      if (r === 1) a = zs.slice();
+    }
+    for (k = 1; k + 1 < n; k++) a[k] = (zs[k - 1] + zs[k] * 2 + zs[k + 1]) / 4;
+    return a;
+  }
+  function suspenderGeo(D, sd, hy) {
+    var OFF = 0.008, path = [], outs = [], x0 = sd * 0.046, yt = 0.80 + hy, yb = 0.53, y, k;
+    var fy = [], fz = [];
+    for (y = yb; y <= yt + 1e-6; y += 0.02) { fy.push(y); fz.push(surfZ(D, x0, y, true, 0.018, 0.5)); }
+    fz = smoothOut(fz, true);
+    for (k = 0; k < fy.length; k++) { path.push([x0, fy[k], fz[k] + OFF]); outs.push([0, 0, 1]); }
+    var zf = fz[fz.length - 1], zb = surfZ(D, sd * 0.042, yt, false, 0.018, 0.5);
+    for (k = 1; k < 6; k++) { var z = zf + (zb - zf) * k / 6; path.push([sd * 0.044, Math.max(yt, topY(D, sd * 0.044, z, yt - 0.02, yt + 0.1)) + OFF, z]); outs.push([0, 1, 0]); }
+    var by = [], bx = [], bz = [];
+    for (y = yt; y >= yb - 1e-6; y -= 0.02) {
+      var u = (yt - y) / (yt - yb), x = sd * 0.042 + (-sd * 0.03 - sd * 0.042) * u;
+      by.push(y); bx.push(x); bz.push(surfZ(D, x, y, false, 0.018, 0.5));
+    }
+    bz = smoothOut(bz, false);
+    for (k = 0; k < by.length; k++) { path.push([bx[k], by[k], bz[k] - OFF]); outs.push([0, 0, -1]); }
+    var r = ribbon(path, outs, 0.017);
+    return skinnedGeo(D, r.pts, r.idx, null, 0.56, 0.07);     // só o tronco: nem pernas nem braços
+  }
+  function beltGeo(D, y) {
+    var pts = [], idx = [], N = 36;
+    for (var i = 0; i <= N; i++) {
+      var th = (i / N) * Math.PI * 2, r = ringR(D, y, th) + 0.007;
+      pts.push([Math.sin(th) * r, y - 0.011, Math.cos(th) * r], [Math.sin(th) * r, y + 0.011, Math.cos(th) * r]);
+      if (i) { var a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    }
+    return skinnedGeo(D, pts, idx);
+  }
+  function beardGeo(D, mustache) {
+    var pts = [], idx = [], grid = {}, xs = [], ys = [], x, y;
+    var x0 = mustache ? -0.022 : -0.052, x1 = -x0, y0 = mustache ? 0.958 : 0.932, y1 = mustache ? 0.968 : 0.978, st = mustache ? 0.011 : 0.0075;
+    for (x = x0; x <= x1 + 1e-6; x += st) xs.push(x);
+    for (y = y0; y <= y1 + 1e-6; y += st) ys.push(y);
+    ys.forEach(function (yy, j) {
+      xs.forEach(function (xx, i) {
+        if (!mustache && yy > 0.952 && Math.abs(xx) < 0.022) return;          // boca livre
+        if (!mustache && yy > 0.966 && Math.abs(xx) < 0.04) return;          // bochechas
+        grid[i + ',' + j] = pts.length;
+        pts.push([xx, yy, surfZ(D, xx, yy, true, 0.007, 0.92) + 0.004]);
+      });
+    });
+    for (var j = 0; j + 1 < ys.length; j++) for (var i = 0; i + 1 < xs.length; i++) {
+      var a = grid[i + ',' + j], b = grid[(i + 1) + ',' + j], c = grid[i + ',' + (j + 1)], d = grid[(i + 1) + ',' + (j + 1)];
+      if (a != null && b != null && c != null && d != null) idx.push(a, b, c, b, d, c);
+    }
+    return skinnedGeo(D, pts, idx);
+  }
+  function wear(mesh, geo, mat) {
+    var sk = new T.SkinnedMesh(geo, mat);
+    sk.bind(mesh.skeleton, mesh.bindMatrix);
+    sk.position.copy(mesh.position); sk.quaternion.copy(mesh.quaternion); sk.scale.copy(mesh.scale);
+    sk.frustumCulled = false;
+    mesh.parent.add(sk);
+    return sk;
   }
   /**
    * ch: personagem clonado (já na escala), body: grupo pai sem escala; o: { h (número), shirt, female, sub, shadows }.
@@ -55,51 +228,40 @@
       };
       x.material = Array.isArray(x.material) ? x.material.map(tm) : tm(x.material);
     });
-    // prende um grupo ao osso, alinhado ao espaço do corpo na pose de fábrica
+    // peças costuradas na roupa (pose de fábrica; o corpo precisa estar na origem)
+    var all = []; ch.traverse(function (x) { if (x.isSkinnedMesh) all.push(x); });
+    if (!all.length) return;
     body.updateMatrixWorld(true);
-    var inv = new T.Matrix4();
-    function onBone(name) {
-      var bone = ch.getObjectByName(name);
-      if (!bone) return null;
-      var g = new T.Group(); g.matrixAutoUpdate = false;
-      inv.copy(bone.matrixWorld).invert();
-      g.matrix.multiplyMatrices(inv, body.matrixWorld);
-      bone.add(g); return g;
-    }
+    // o corpo inteiro (pele, roupa, sapatos), menos olhos; a peça é convertida e presa no MESMO pedaço de referência
+    var parts = all.filter(function (m) { var mt = Array.isArray(m.material) ? m.material[0] : m.material; return !/^Eyes$/.test(mt && mt.name); });
+    var skm = (parts.length ? parts : all)[0];
+    var D = bodyData(parts.length ? parts : all);
     var hy = female ? -0.034 : 0;      // as mulheres são um pouco mais baixas
-    var leather = dmat(boots), dark = dmat('#2a211b'), metal = dmat('#c9b27a');
-    // cinto com fivela
-    var hips = onBone('Hips');
-    if (hips) {
-      var belt = new T.Mesh(new T.CylinderGeometry(0.094, 0.09, 0.022, 20, 1, true), dmat('#3a2a1e', 'dupla'));
-      belt.scale.z = 0.78; belt.position.set(0, 0.488, 0.006); hips.add(belt);
-      var buckle = new T.Mesh(new T.BoxGeometry(0.03, 0.024, 0.008), metal); buckle.position.set(0, 0.488, 0.078); hips.add(buckle);
-    }
-    // suspensório (homens e metade das mulheres)
-    var torso = onBone('Torso');
-    if (torso && !o.formal && (!female || h % 2)) {
-      var sm = dmat(pick(['#b5652f', '#8a4b2a', '#6b4a2e', '#3f4a5a'], 5));
+    var metal = dmat('#c9b27a');
+    // cinto com fivela, na cintura da calça
+    wear(skm, piece(D, 'cinto', function () { return beltGeo(D, 0.488); }), dmat('#3a2a1e', 'dupla'));
+    var zb = piece(D, 'zfivela', function () { return surfZ(D, 0, 0.488, true); });
+    wear(skm, piece(D, 'fivela', function () { var b = boxPts(0, 0.488, zb + 0.008, 0.03, 0.024, 0.008); return skinnedGeo(D, b.pts, b.idx, [0, 0.488, zb]); }), metal);
+    // suspensório (homens e metade das mulheres), em X nas costas
+    if (!o.formal && (!female || h % 2)) {
+      var sm = dmat(pick(['#b5652f', '#8a4b2a', '#6b4a2e', '#3f4a5a'], 5), 'dupla');
       [-1, 1].forEach(function (sd) {
-        strap(torso, sm, [sd * 0.042, 0.81 + hy, 0.04], [sd * 0.045, 0.70 + hy, 0.082], 0.018, 0.008);   // frente: ombro → peito
-        strap(torso, sm, [sd * 0.045, 0.70 + hy, 0.082], [sd * 0.05, 0.5, 0.086], 0.018, 0.008);         // peito → cintura
-        strap(torso, sm, [sd * 0.042, 0.81 + hy, 0.03], [sd * 0.04, 0.70 + hy, -0.074], 0.018, 0.008);   // costas
-        strap(torso, sm, [sd * 0.04, 0.70 + hy, -0.074], [-sd * 0.03, 0.5, -0.082], 0.018, 0.008);       // em X até a cintura
-        var clip = new T.Mesh(new T.BoxGeometry(0.022, 0.014, 0.01), metal); clip.position.set(sd * 0.05, 0.505, 0.09); torso.add(clip);
+        wear(skm, piece(D, 'susp' + sd, function () { return suspenderGeo(D, sd, hy); }), sm);
+        var zc = piece(D, 'zclip' + sd, function () { return surfZ(D, sd * 0.046, 0.52, true, 0.018, 0.5); });
+        wear(skm, piece(D, 'clip' + sd, function () { var b = boxPts(sd * 0.046, 0.52, zc + 0.012, 0.022, 0.014, 0.008); return skinnedGeo(D, b.pts, b.idx, [sd * 0.046, 0.52, zc], 0.5); }), metal);
       });
     }
-    // mochila laranja nos subagentes (trabalho de campo)
-    if (torso && o.sub) {
-      var bag = new T.Mesh(new T.BoxGeometry(0.105, 0.13, 0.05), dmat('#d9692a')); bag.position.set(0, 0.69 + hy, -0.085); torso.add(bag);
-      var flap = new T.Mesh(new T.BoxGeometry(0.108, 0.04, 0.054), dmat('#b8551f')); flap.position.set(0, 0.745 + hy, -0.085); torso.add(flap);
+    // mochila laranja nos subagentes, encostada nas costas
+    if (o.sub) {
+      var zk = piece(D, 'zmochila', function () { return surfZ(D, 0, 0.69 + hy, false); });
+      wear(skm, piece(D, 'mochila', function () { var b = boxPts(0, 0.69 + hy, zk - 0.026, 0.1, 0.13, 0.05); return skinnedGeo(D, b.pts, b.idx, [0, 0.69 + hy, zk]); }), dmat('#d9692a'));
+      wear(skm, piece(D, 'aba', function () { var b = boxPts(0, 0.742 + hy, zk - 0.028, 0.104, 0.035, 0.056); return skinnedGeo(D, b.pts, b.idx, [0, 0.69 + hy, zk]); }), dmat('#b8551f'));
     }
-    // barba (60% dos homens) e bigode
-    var head = onBone('Head');
-    if (head && !female && h % 5 < 3) {
+    // barba (60% dos homens) e bigode, colados no rosto
+    if (!female && h % 5 < 3) {
       var bm = dmat(hair, 'dupla');
-      // só a parte de baixo do rosto: queixo e maxilar
-      var beard = new T.Mesh(new T.SphereGeometry(0.058, 16, 8, 0, Math.PI, Math.PI * 0.64, Math.PI * 0.34), bm);
-      beard.position.set(0, 0.99, -0.004); beard.scale.set(0.98, 1.15, 1.18); head.add(beard);
-      var must = new T.Mesh(new T.BoxGeometry(0.034, 0.008, 0.012), bm); must.position.set(0, 0.962, 0.064); head.add(must);
+      wear(skm, piece(D, 'barba', function () { return beardGeo(D, false); }), bm);
+      wear(skm, piece(D, 'bigode', function () { return beardGeo(D, true); }), bm);
     }
   }
 
